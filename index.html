@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>บัญชีรายรับรายจ่าย</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero" aria-labelledby="app-title">
+        <div>
+          <p class="eyebrow">Money Journal</p>
+          <h1 id="app-title">บัญชีรายรับรายจ่าย</h1>
+          <p class="hero-copy">บันทึกธุรกรรมรายวัน ดูยอดคงเหลือ และสรุปกระแสเงินสดของคุณได้ในหน้าเดียว</p>
+        </div>
+        <div class="hero-card" aria-label="ยอดคงเหลือสุทธิ">
+          <span>ยอดคงเหลือ</span>
+          <strong id="balance-total">฿0.00</strong>
+        </div>
+      </section>
+
+      <section class="summary-grid" aria-label="สรุปยอดเงิน">
+        <article class="summary-card income">
+          <span>รายรับรวม</span>
+          <strong id="income-total">฿0.00</strong>
+        </article>
+        <article class="summary-card expense">
+          <span>รายจ่ายรวม</span>
+          <strong id="expense-total">฿0.00</strong>
+        </article>
+        <article class="summary-card count">
+          <span>จำนวนรายการ</span>
+          <strong id="transaction-count">0</strong>
+        </article>
+      </section>
+
+      <section class="content-grid">
+        <form id="transaction-form" class="panel form-panel">
+          <div class="panel-heading">
+            <h2>เพิ่มรายการใหม่</h2>
+            <p>กรอกข้อมูลรายรับหรือรายจ่ายของคุณ</p>
+          </div>
+
+          <label>
+            ประเภท
+            <select id="type" required>
+              <option value="income">รายรับ</option>
+              <option value="expense">รายจ่าย</option>
+            </select>
+          </label>
+
+          <label>
+            รายการ
+            <input id="description" type="text" placeholder="เช่น เงินเดือน, ค่าอาหาร" required />
+          </label>
+
+          <label>
+            หมวดหมู่
+            <input id="category" type="text" placeholder="เช่น งาน, บ้าน, เดินทาง" required />
+          </label>
+
+          <label>
+            จำนวนเงิน (บาท)
+            <input id="amount" type="number" min="0.01" step="0.01" placeholder="0.00" required />
+          </label>
+
+          <label>
+            วันที่
+            <input id="date" type="date" required />
+          </label>
+
+          <button type="submit">บันทึกรายการ</button>
+        </form>
+
+        <section class="panel list-panel" aria-labelledby="transaction-list-title">
+          <div class="panel-heading list-heading">
+            <div>
+              <h2 id="transaction-list-title">รายการล่าสุด</h2>
+              <p>ข้อมูลจะถูกบันทึกไว้ในเบราว์เซอร์นี้</p>
+            </div>
+            <button id="clear-button" class="ghost-button" type="button">ล้างทั้งหมด</button>
+          </div>
+
+          <div class="filters" role="group" aria-label="ตัวกรองรายการ">
+            <button class="filter-button active" type="button" data-filter="all">ทั้งหมด</button>
+            <button class="filter-button" type="button" data-filter="income">รายรับ</button>
+            <button class="filter-button" type="button" data-filter="expense">รายจ่าย</button>
+          </div>
+
+          <ul id="transaction-list" class="transaction-list"></ul>
+          <p id="empty-state" class="empty-state">ยังไม่มีรายการ เริ่มบันทึกรายรับรายจ่ายรายการแรกได้เลย</p>
+        </section>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
