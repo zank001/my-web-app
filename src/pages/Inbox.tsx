@@ -14,15 +14,11 @@ export default function Inbox() {
   const viewDeptId = me?.role === 'qmr' ? 'd-ipd' : myDeptId
   const viewDept = depts.find((d) => d.id === viewDeptId)
 
-  const inbox = useStore((s) =>
-    s.distributions
-      .map((d) => ({
-        dist: d,
-        recipient: d.recipients.find((r) => r.departmentId === viewDeptId),
-      }))
-      .filter((x) => x.recipient)
-      .sort((a, b) => +new Date(b.dist.sentAt) - +new Date(a.dist.sentAt)),
-  )
+  const dists = useStore((s) => s.distributions)
+  const inbox = dists
+    .map((d) => ({ dist: d, recipient: d.recipients.find((r) => r.departmentId === viewDeptId) }))
+    .filter((x) => x.recipient)
+    .sort((a, b) => +new Date(b.dist.sentAt) - +new Date(a.dist.sentAt))
 
   return (
     <div className="space-y-6">
