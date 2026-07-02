@@ -20,14 +20,13 @@ const transporter = process.env.SMTP_HOST
   : nodemailer.createTransport({ jsonTransport: true })
 
 interface NotifyReq {
-  distributionId: string
   documentCode?: string
   message: string
   recipients: Array<{ name: string; email: string }>
 }
 
 app.post('/api/notify', async (req, res) => {
-  const { distributionId, documentCode, message, recipients } = req.body as NotifyReq
+  const { documentCode, message, recipients } = req.body as NotifyReq
   if (!Array.isArray(recipients) || recipients.length === 0) {
     return res.status(400).json({ error: 'recipients required' })
   }
@@ -38,11 +37,11 @@ app.post('/api/notify', async (req, res) => {
         from: process.env.MAIL_FROM ?? '"QMR Document Delivery" <qmr@hospital.go.th>',
         to: `"${r.name}" <${r.email}>`,
         subject: `[QMR] เอกสารใหม่ ${documentCode ?? ''} — โปรดรับทราบ`,
-        text: `เรียน ${r.name}\n\n${message}\n\nกรุณาเข้าระบบเพื่อลงนามรับทราบ: https://qmr.hospital.local/inbox/${distributionId}\n\nQMR Office`,
+        text: `เรียน ${r.name}\n\n${message}\n\nกรุณาเข้าระบบเพื่อลงนามรับทราบ: https://zank001.github.io/my-web-app/\n\nQMR Office`,
         html: `
           <p>เรียน ${r.name}</p>
           <p>${message}</p>
-          <p>กรุณา <a href="https://qmr.hospital.local/inbox/${distributionId}">เข้าระบบเพื่อลงนามรับทราบ</a></p>
+          <p>กรุณา <a href="https://zank001.github.io/my-web-app/">เข้าระบบเพื่อลงนามรับทราบ</a></p>
           <hr/>
           <p style="color:#64748b;font-size:12px">QMR Office · ${documentCode ?? ''}</p>
         `,

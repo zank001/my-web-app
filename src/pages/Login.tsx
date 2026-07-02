@@ -2,7 +2,7 @@ import { ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
-  const [email, setEmail] = useState('qmr@hospital.go.th')
+  const [email, setEmail] = useState('qmr@paihospital.go.th')
   const [password, setPassword] = useState('demo')
 
   return (
@@ -13,15 +13,12 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
             <ShieldCheck size={26} />
           </div>
           <div>
-            <h1 className="text-lg font-bold leading-tight">QMR Document Delivery</h1>
-            <p className="text-xs text-slate-500">ระบบส่งเอกสารคุณภาพ — โรงพยาบาล</p>
+            <h1 className="text-lg font-bold leading-tight">ศูนย์คุณภาพ โรงพยาบาลปาย</h1>
+            <p className="text-xs text-slate-500">ระบบจัดทำและควบคุมเอกสารคุณภาพ (QM-QMR-001)</p>
           </div>
         </div>
 
-        <form
-          onSubmit={(e) => { e.preventDefault(); onLogin() }}
-          className="space-y-4"
-        >
+        <form onSubmit={(e) => { e.preventDefault(); onLogin() }} className="space-y-4">
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">อีเมล</label>
             <input

@@ -1,68 +1,71 @@
 import { CheckCircle2, FileText } from 'lucide-react'
 import { useState } from 'react'
 import Card from '../components/Card'
-import { AckBadge, PriorityBadge, TypeBadge } from '../components/Badges'
+import { AckBadge, LevelBadge } from '../components/Badges'
 import { actions, useStore } from '../data/store'
-import { formatDate, relativeTime } from '../lib/format'
+import { docCode, formatDate, relativeTime } from '../lib/format'
+import type { Distribution, DistributionRecipient, QualityDocument } from '../types'
 
 export default function Inbox() {
-  const me = useStore((s) => s.users.find((u) => u.id === s.currentUserId))
-  const myDeptId = me?.departmentId
-  const docs = useStore((s) => s.documents)
   const depts = useStore((s) => s.departments)
-  // For the demo, the QMR user views the inbox of dept IPD to exercise the acknowledge flow.
-  const viewDeptId = me?.role === 'qmr' ? 'd-ipd' : myDeptId
-  const viewDept = depts.find((d) => d.id === viewDeptId)
-
+  const docs = useStore((s) => s.documents)
   const dists = useStore((s) => s.distributions)
+  const [viewDept, setViewDept] = useState('OPD')
+
   const inbox = dists
-    .map((d) => ({ dist: d, recipient: d.recipients.find((r) => r.departmentId === viewDeptId) }))
-    .filter((x) => x.recipient)
+    .map((d) => ({ dist: d, recipient: d.recipients.find((r) => r.deptCode === viewDept) }))
+    .filter((x): x is { dist: Distribution; recipient: DistributionRecipient } => Boolean(x.recipient))
     .sort((a, b) => +new Date(b.dist.sentAt) - +new Date(a.dist.sentAt))
+
+  const dept = depts.find((d) => d.code === viewDept)
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">กล่องรับเอกสาร</h1>
-        <p className="text-sm text-slate-500">
-          มุมมองในฐานะ <span className="font-semibold">{viewDept?.nameTh}</span> ({viewDept?.code}) ·
-          ผู้รับ: <span className="font-semibold">{viewDept?.head}</span>
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">กล่องรับเอกสาร</h1>
+          <p className="text-sm text-slate-500">
+            มุมมองหน่วยงานปลายทาง — เปิดอ่านและลงนามรับทราบเอกสารที่ QMR แจกจ่าย
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-slate-500">ดูในฐานะ</span>
+          <select
+            value={viewDept}
+            onChange={(e) => setViewDept(e.target.value)}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400"
+          >
+            {depts.map((d) => <option key={d.code} value={d.code}>{d.code} — {d.nameTh}</option>)}
+          </select>
+        </div>
       </div>
 
-      <ul className="space-y-3">
-        {inbox.map(({ dist, recipient }) => {
-          const doc = docs.find((d) => d.id === dist.documentId)
-          if (!doc || !recipient) return null
-          return <InboxItem key={dist.id} dist={dist} doc={doc} recipient={recipient} />
-        })}
-      </ul>
+      {inbox.length === 0 ? (
+        <Card>
+          <div className="py-10 text-center text-sm text-slate-400">
+            ยังไม่มีเอกสารแจกจ่ายถึง {dept?.nameTh ?? viewDept}
+          </div>
+        </Card>
+      ) : (
+        <ul className="space-y-3">
+          {inbox.map(({ dist, recipient }) => {
+            const doc = docs.find((d) => d.id === dist.documentId)
+            if (!doc) return null
+            return <InboxItem key={dist.id} dist={dist} doc={doc} recipient={recipient} />
+          })}
+        </ul>
+      )}
     </div>
   )
 }
 
 function InboxItem({
   dist, doc, recipient,
-}: {
-  dist: import('../types').Distribution
-  doc: import('../types').QualityDocument
-  recipient: import('../types').DistributionRecipient
-}) {
+}: { dist: Distribution; doc: QualityDocument; recipient: DistributionRecipient }) {
   const [signing, setSigning] = useState(false)
   const [signature, setSignature] = useState('')
   const [note, setNote] = useState('')
   const acked = recipient.status === 'acknowledged'
-
-  const onOpen = () => {
-    if (recipient.status === 'pending') {
-      actions.markOpened(dist.id, recipient.departmentId)
-    }
-  }
-  const onAck = () => {
-    if (!signature.trim()) return
-    actions.acknowledge(dist.id, recipient.departmentId, signature, note)
-    setSigning(false); setSignature(''); setNote('')
-  }
 
   return (
     <Card>
@@ -73,13 +76,12 @@ function InboxItem({
           </div>
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-semibold">{doc.code}</span>
-              <span className="text-slate-700">{doc.title}</span>
-              <TypeBadge type={doc.type} />
-              <PriorityBadge p={doc.priority} />
+              <span className="font-mono font-bold text-brand-700">{docCode(doc)}</span>
+              <span className="font-medium text-slate-800">{doc.title}</span>
+              <LevelBadge level={doc.level} />
             </div>
             <div className="text-xs text-slate-500">
-              ส่งโดย QMR · {relativeTime(dist.sentAt)} · ครบกำหนด {formatDate(dist.dueAt)} · v{doc.version}
+              แจกจ่ายโดย {dist.sentBy} · {relativeTime(dist.sentAt)} · ลงนามภายใน {formatDate(dist.dueAt)}
             </div>
             <div className="mt-1 text-sm text-slate-700">{dist.message}</div>
           </div>
@@ -88,27 +90,35 @@ function InboxItem({
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
-        <button onClick={onOpen} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm hover:bg-slate-50">
+        <button
+          onClick={() => actions.markOpened(dist.id, recipient.deptCode)}
+          className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm hover:bg-slate-50"
+        >
           เปิดอ่านเอกสาร
         </button>
-        {!acked && (
-          <button onClick={() => setSigning(true)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700">
+        {!acked ? (
+          <button
+            onClick={() => setSigning(true)}
+            className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700"
+          >
             <CheckCircle2 size={16} /> ลงนามรับทราบ
           </button>
-        )}
-        {acked && recipient.acknowledgedAt && (
-          <div className="text-xs text-emerald-700">
-            ลงนามรับทราบโดย <span className="font-semibold">{recipient.signature}</span> · {relativeTime(recipient.acknowledgedAt)}
-          </div>
+        ) : (
+          recipient.acknowledgedAt && (
+            <div className="text-xs text-emerald-700">
+              ลงนามรับทราบโดย <span className="font-semibold">{recipient.signature}</span> · {relativeTime(recipient.acknowledgedAt)}
+              {recipient.note ? ` · หมายเหตุ: ${recipient.note}` : ''}
+            </div>
+          )
         )}
       </div>
 
-      {signing && (
+      {signing && !acked && (
         <div className="mt-3 rounded-xl bg-slate-50 p-3">
           <div className="grid gap-2 md:grid-cols-2">
             <input
               value={signature} onChange={(e) => setSignature(e.target.value)}
-              placeholder="ชื่อผู้ลงนามรับทราบ"
+              placeholder="ชื่อ-ตำแหน่งผู้ลงนามรับทราบ"
               className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
             />
             <input
@@ -119,8 +129,12 @@ function InboxItem({
           </div>
           <div className="mt-2 flex justify-end gap-2">
             <button onClick={() => setSigning(false)} className="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100">ยกเลิก</button>
-            <button onClick={onAck} disabled={!signature.trim()} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:bg-slate-300">
-              ยืนยันรับทราบ
+            <button
+              onClick={() => { actions.acknowledge(dist.id, recipient.deptCode, signature, note || undefined); setSigning(false) }}
+              disabled={!signature.trim()}
+              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:bg-slate-300"
+            >
+              ยืนยันการลงนาม
             </button>
           </div>
         </div>

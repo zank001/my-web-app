@@ -1,22 +1,31 @@
 import {
-  BarChart3, FileText, Inbox as InboxIcon, LayoutDashboard,
-  LogOut, Send, ShieldCheck, Upload as UploadIcon,
+  BarChart3, BookOpenCheck, ClipboardCheck, FilePlus2, FileText,
+  Inbox as InboxIcon, LayoutDashboard, LogOut, Send, ShieldCheck,
 } from 'lucide-react'
+import { useStore } from '../data/store'
 
-export type Page = 'dashboard' | 'documents' | 'upload' | 'distribution' | 'inbox' | 'reports'
-
-const items: Array<{ key: Page; label: string; icon: typeof FileText; hint?: string }> = [
-  { key: 'dashboard',    label: 'แดชบอร์ด',          icon: LayoutDashboard },
-  { key: 'documents',    label: 'คลังเอกสาร',        icon: FileText },
-  { key: 'upload',       label: 'อัปโหลด/สร้างใหม่',  icon: UploadIcon },
-  { key: 'distribution', label: 'การจ่ายเอกสาร',     icon: Send },
-  { key: 'inbox',        label: 'กล่องรับเอกสาร',    icon: InboxIcon, hint: '3' },
-  { key: 'reports',      label: 'รายงาน & ตรวจสอบ', icon: BarChart3 },
-]
+export type Page =
+  | 'dashboard' | 'register' | 'request' | 'approvals'
+  | 'distribution' | 'inbox' | 'reports' | 'manual'
 
 export default function Sidebar({
   current, onNavigate, onSignOut,
 }: { current: Page; onNavigate: (p: Page) => void; onSignOut: () => void }) {
+  const pendingRequests = useStore((s) => s.requests).filter(
+    (r) => r.status === 'submitted' || r.status === 'reviewed',
+  ).length
+
+  const items: Array<{ key: Page; label: string; icon: typeof FileText; hint?: number }> = [
+    { key: 'dashboard',    label: 'แดชบอร์ด',                icon: LayoutDashboard },
+    { key: 'register',     label: 'บัญชีเอกสารคุณภาพ',       icon: FileText },
+    { key: 'request',      label: 'ขอขึ้นทะเบียน/แก้ไข',     icon: FilePlus2 },
+    { key: 'approvals',    label: 'ตรวจสอบ & อนุมัติ',       icon: ClipboardCheck, hint: pendingRequests },
+    { key: 'distribution', label: 'การแจกจ่ายเอกสาร',        icon: Send },
+    { key: 'inbox',        label: 'กล่องรับเอกสาร',          icon: InboxIcon },
+    { key: 'reports',      label: 'รายงาน & ตรวจสอบ',        icon: BarChart3 },
+    { key: 'manual',       label: 'คู่มือระบบ (QM-QMR-001)', icon: BookOpenCheck },
+  ]
+
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-white md:flex">
       <div className="flex items-center gap-3 px-5 py-5">
@@ -24,12 +33,12 @@ export default function Sidebar({
           <ShieldCheck size={22} />
         </div>
         <div>
-          <div className="text-sm font-semibold leading-tight">QMR Document</div>
-          <div className="text-xs text-slate-500">ระบบส่งเอกสารคุณภาพ</div>
+          <div className="text-sm font-semibold leading-tight">ศูนย์คุณภาพ รพ.ปาย</div>
+          <div className="text-xs text-slate-500">ระบบควบคุมเอกสารคุณภาพ</div>
         </div>
       </div>
 
-      <nav className="flex-1 px-3">
+      <nav className="flex-1 overflow-y-auto px-3 scrollbar-thin">
         {items.map(({ key, label, icon: Icon, hint }) => {
           const active = current === key
           return (
@@ -45,11 +54,11 @@ export default function Sidebar({
             >
               <Icon size={18} className={active ? 'text-brand-600' : 'text-slate-500'} />
               <span className="flex-1 text-left">{label}</span>
-              {hint && (
+              {hint ? (
                 <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-600">
                   {hint}
                 </span>
-              )}
+              ) : null}
             </button>
           )
         })}
@@ -63,8 +72,8 @@ export default function Sidebar({
           <LogOut size={18} className="text-slate-500" />
           ออกจากระบบ
         </button>
-        <div className="px-3 pt-3 text-[10px] text-slate-400">
-          v0.1.0 · ISO 9001 / HA
+        <div className="px-3 pt-3 text-[10px] leading-relaxed text-slate-400">
+          อ้างอิง QM-QMR-001-1<br />การจัดทำและควบคุมเอกสารคุณภาพ
         </div>
       </div>
     </aside>
