@@ -35,12 +35,16 @@ export const departments: Department[] = [
   { code: 'HD',  nameTh: 'งานการพยาบาลไตเทียม', group: 'งานการพยาบาล' },
 ]
 
-/** ผู้เกี่ยวข้องจริงตามหน้าปก QM-QMR-001-1 */
+/**
+ * ผู้ใช้ตัวอย่าง 4 ระดับ (ผู้เกี่ยวข้องจริงตามหน้าปก QM-QMR-001-1)
+ * ใช้อีเมลเหล่านี้ล็อกอินในโหมดสาธิต
+ */
 export const users: User[] = [
-  { id: 'u-patiphan',    name: 'ภก.ปฏิภาณ คำมาเร็ว',   position: 'เภสัชกร',                    email: 'qmr@paihospital.go.th',      role: 'qmr',      deptCode: 'QMR' },
-  { id: 'u-uraiporn',    name: 'นางอุไรพร วิเศษสมิต',   position: 'พยาบาลวิชาชีพชำนาญการ',      email: 'review@paihospital.go.th',   role: 'dept_head', deptCode: 'QMR' },
-  { id: 'u-wattanachai', name: 'นพ.วัฒนชัย วิเศษสมิต',  position: 'ผู้อำนวยการโรงพยาบาล',       email: 'director@paihospital.go.th', role: 'director', deptCode: 'ADM' },
-  { id: 'u-opd-head',    name: 'หัวหน้างานการพยาบาลผู้ป่วยนอก', position: 'พยาบาลวิชาชีพชำนาญการ', email: 'opd@paihospital.go.th',   role: 'dept_head', deptCode: 'OPD' },
+  { id: 'u-wattanachai', name: 'นพ.วัฒนชัย วิเศษสมิต',  position: 'ผู้อำนวยการโรงพยาบาล',            email: 'director@paihospital.go.th', role: 'director', deptCode: 'ADM' },
+  { id: 'u-patiphan',    name: 'ภก.ปฏิภาณ คำมาเร็ว',   position: 'เภสัชกร · เลขานุการศูนย์คุณภาพ',   email: 'qmr@paihospital.go.th',      role: 'qmr',      deptCode: 'QMR' },
+  { id: 'u-uraiporn',    name: 'นางอุไรพร วิเศษสมิต',   position: 'พยาบาลวิชาชีพชำนาญการ · ศูนย์คุณภาพ', email: 'review@paihospital.go.th', role: 'qmr',      deptCode: 'QMR' },
+  { id: 'u-chair-pha',   name: 'ภญ.หัวหน้ากลุ่มงานเภสัชกรรม', position: 'เภสัชกรชำนาญการ · หัวหน้ากลุ่มงาน', email: 'chair@paihospital.go.th', role: 'chair',    deptCode: 'PHA' },
+  { id: 'u-staff-ipd',   name: 'พว.วรรณา สดใส',        position: 'พยาบาลวิชาชีพ · งานผู้ป่วยใน',      email: 'staff@paihospital.go.th',    role: 'staff',    deptCode: 'IPD' },
 ]
 
 const iso = (offsetDays: number, from = new Date()) => {

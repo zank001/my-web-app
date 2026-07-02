@@ -13,7 +13,7 @@ import {
 } from './seed'
 
 interface State {
-  currentUserId: string
+  currentUserId: string | null
   users: User[]
   departments: Department[]
   documents: QualityDocument[]
@@ -22,8 +22,18 @@ interface State {
   activities: Activity[]
 }
 
+const SESSION_KEY = 'qmr_session'
+const readSession = (): string | null => {
+  try {
+    const id = localStorage.getItem(SESSION_KEY)
+    return id && seedUsers.some((u) => u.id === id) ? id : null
+  } catch {
+    return null
+  }
+}
+
 let state: State = {
-  currentUserId: 'u-patiphan',
+  currentUserId: readSession(),
   users: seedUsers,
   departments: seedDepartments,
   documents: seedDocuments,
@@ -31,6 +41,9 @@ let state: State = {
   distributions: seedDistributions,
   activities: seedActivities,
 }
+
+// OTP ที่ออกให้ระหว่างล็อกอิน (เดโม — เก็บชั่วคราวในหน่วยความจำ ไม่ใช่ใน state)
+let otpChallenge: { email: string; code: string; userId: string } | null = null
 
 const listeners = new Set<() => void>()
 const emit = () => listeners.forEach((l) => l())
@@ -69,6 +82,42 @@ export const nextSeq = (level: QualityDocument['level'], deptCode: string) =>
     .reduce((max, d) => Math.max(max, d.seq), 0) + 1
 
 export const actions = {
+  /**
+   * ขั้นที่ 1 ของล็อกอิน: ขอรหัส OTP ทางอีเมล
+   * โหมดสาธิต — ไม่ได้ส่งอีเมลจริง แต่คืนรหัสกลับมาเพื่อแสดงบนจอ
+   * (จุดนี้สลับเป็น Firebase Auth email link/OTP ได้ในภายหลัง)
+   */
+  requestOtp(email: string): { ok: boolean; code?: string; error?: string } {
+    const user = state.users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase())
+    if (!user) return { ok: false, error: 'ไม่พบอีเมลนี้ในระบบ กรุณาตรวจสอบอีกครั้ง' }
+    const code = String(Math.floor(100000 + Math.random() * 900000))
+    otpChallenge = { email: user.email.toLowerCase(), code, userId: user.id }
+    return { ok: true, code }
+  },
+
+  /** ขั้นที่ 2 ของล็อกอิน: ยืนยันรหัส OTP */
+  verifyOtp(email: string, code: string): { ok: boolean; error?: string } {
+    if (!otpChallenge || otpChallenge.email !== email.trim().toLowerCase()) {
+      return { ok: false, error: 'กรุณาขอรหัสใหม่อีกครั้ง' }
+    }
+    if (otpChallenge.code !== code.trim()) {
+      return { ok: false, error: 'รหัส OTP ไม่ถูกต้อง' }
+    }
+    const userId = otpChallenge.userId
+    otpChallenge = null
+    try { localStorage.setItem(SESSION_KEY, userId) } catch { /* ignore */ }
+    update((s) => ({ ...s, currentUserId: userId }))
+    const user = state.users.find((u) => u.id === userId)
+    log('เข้าสู่ระบบ', user?.name ?? '')
+    return { ok: true }
+  },
+
+  logout() {
+    otpChallenge = null
+    try { localStorage.removeItem(SESSION_KEY) } catch { /* ignore */ }
+    update((s) => ({ ...s, currentUserId: null }))
+  },
+
   /** ยื่นใบขอขึ้นทะเบียน/แก้ไข/ยกเลิก (FM-QMR-001-01) */
   submitRequest(req: Omit<DocRequest, 'id' | 'submittedAt' | 'status'>) {
     const full: DocRequest = { ...req, id: uid('req'), submittedAt: now(), status: 'submitted' }

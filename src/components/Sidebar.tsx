@@ -3,6 +3,7 @@ import {
   Inbox as InboxIcon, LayoutDashboard, LogOut, Send, ShieldCheck,
 } from 'lucide-react'
 import { useStore } from '../data/store'
+import { canSeePage, roleColor, roleLabel } from '../lib/permissions'
 
 export type Page =
   | 'dashboard' | 'register' | 'request' | 'approvals'
@@ -11,9 +12,9 @@ export type Page =
 export default function Sidebar({
   current, onNavigate, onSignOut,
 }: { current: Page; onNavigate: (p: Page) => void; onSignOut: () => void }) {
-  const pendingRequests = useStore((s) => s.requests).filter(
-    (r) => r.status === 'submitted' || r.status === 'reviewed',
-  ).length
+  const me = useStore((s) => s.users.find((u) => u.id === s.currentUserId))
+  const requests = useStore((s) => s.requests)
+  const pendingRequests = requests.filter((r) => r.status === 'submitted' || r.status === 'reviewed').length
 
   const items: Array<{ key: Page; label: string; icon: typeof FileText; hint?: number }> = [
     { key: 'dashboard',    label: 'แดชบอร์ด',                icon: LayoutDashboard },
@@ -25,6 +26,8 @@ export default function Sidebar({
     { key: 'reports',      label: 'รายงาน & ตรวจสอบ',        icon: BarChart3 },
     { key: 'manual',       label: 'คู่มือระบบ (QM-QMR-001)', icon: BookOpenCheck },
   ]
+
+  const visible = me ? items.filter((it) => canSeePage(me.role, it.key)) : items
 
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-white md:flex">
@@ -39,7 +42,7 @@ export default function Sidebar({
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 scrollbar-thin">
-        {items.map(({ key, label, icon: Icon, hint }) => {
+        {visible.map(({ key, label, icon: Icon, hint }) => {
           const active = current === key
           return (
             <button
@@ -65,6 +68,14 @@ export default function Sidebar({
       </nav>
 
       <div className="border-t border-slate-200 p-3">
+        {me && (
+          <div className="mb-2 rounded-lg bg-slate-50 px-3 py-2">
+            <div className="truncate text-xs font-semibold text-slate-700">{me.name}</div>
+            <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${roleColor[me.role]}`}>
+              {roleLabel[me.role]}
+            </span>
+          </div>
+        )}
         <button
           onClick={onSignOut}
           className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900"
