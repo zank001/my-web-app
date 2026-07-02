@@ -3,29 +3,32 @@ import { AnimatePresence, motion } from 'motion/react'
 import Sidebar, { type Page } from './components/Sidebar'
 import Topbar from './components/Topbar'
 import Dashboard from './pages/Dashboard'
-import Documents from './pages/Documents'
-import Upload from './pages/Upload'
+import Register from './pages/Register'
+import RequestForm from './pages/RequestForm'
+import Approvals from './pages/Approvals'
 import Distribution from './pages/Distribution'
 import Inbox from './pages/Inbox'
 import Reports from './pages/Reports'
+import Manual from './pages/Manual'
 import Login from './pages/Login'
-import { useStore } from './data/store'
 
 export default function App() {
   const [page, setPage] = useState<Page>('dashboard')
-  const currentUserId = useStore((s) => s.currentUserId)
-  const [authed, setAuthed] = useState(true) // demo: pre-authed; toggle to show Login
+  const [authed, setAuthed] = useState(true) // โหมดสาธิต: ล็อกอินอัตโนมัติ
+  const [query, setQuery] = useState('')
 
   if (!authed) return <Login onLogin={() => setAuthed(true)} />
 
   const render = () => {
     switch (page) {
       case 'dashboard':    return <Dashboard onNavigate={setPage} />
-      case 'documents':    return <Documents />
-      case 'upload':       return <Upload onDone={() => setPage('distribution')} />
+      case 'register':     return <Register query={query} onQuery={setQuery} />
+      case 'request':      return <RequestForm onDone={() => setPage('approvals')} />
+      case 'approvals':    return <Approvals />
       case 'distribution': return <Distribution />
       case 'inbox':        return <Inbox />
       case 'reports':      return <Reports />
+      case 'manual':       return <Manual />
       default:             return null
     }
   }
@@ -34,7 +37,7 @@ export default function App() {
     <div className="flex h-screen bg-slate-50 text-slate-900">
       <Sidebar current={page} onNavigate={setPage} onSignOut={() => setAuthed(false)} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar currentUserId={currentUserId} onNavigate={setPage} />
+        <Topbar onNavigate={setPage} query={query} onQuery={setQuery} />
         <main className="flex-1 overflow-y-auto scrollbar-thin">
           <AnimatePresence mode="wait">
             <motion.div

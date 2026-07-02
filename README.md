@@ -1,97 +1,88 @@
-# QMR Document Delivery — ระบบส่งเอกสารคุณภาพของโรงพยาบาล
+# ระบบจัดทำและควบคุมเอกสารคุณภาพ — ศูนย์คุณภาพ โรงพยาบาลปาย
 
-ระบบส่งและติดตามการรับทราบเอกสารคุณภาพ (Quality Documents) สำหรับ
-**QMR — Quality Management Representative** ของโรงพยาบาล ใช้สำหรับ
-ควบคุมเอกสาร (Document Control) ตามมาตรฐาน HA / ISO 9001 โดยรวม
-การอัปโหลด, การจ่ายเอกสาร, การลงนามรับทราบ และการรายงานเข้าด้วยกัน
-ในระบบเดียว
+เว็บแอประบบควบคุมเอกสารคุณภาพ (Document Control) สร้างตามเอกสารแม่บท
+**QM-QMR-001-1 "การจัดทำและควบคุมเอกสารคุณภาพ"** ของศูนย์คุณภาพ
+โรงพยาบาลปาย ครอบคลุมวงจรเอกสารทั้งหมด: ขอขึ้นทะเบียน → ตรวจสอบ →
+อนุมัติ → ขึ้นทะเบียนเป็นเอกสารควบคุม → แจกจ่าย/ลงนามรับทราบ →
+แก้ไข/ยกเลิก → เก็บรอทำลาย
 
-## ภาพรวมระบบ
+🌐 **Live**: https://zank001.github.io/my-web-app/
 
-```
-┌──────────────────────────────┐   อีเมล / ในแอป / LINE
-│   QMR (สำนัก/ศูนย์คุณภาพ)    │ ─────────────────────┐
-└──────────────┬───────────────┘                      │
-               │ อัปโหลด & จ่ายเอกสาร                 ▼
-        ┌──────▼──────┐                  ┌────────────────────────┐
-        │  คลังเอกสาร │ ─── ติดตาม ──▶  │  หน่วยงานปลายทาง       │
-        │  (Firestore │                  │  - OPD / IPD / ER /…   │
-        │   + Storage)│ ◀── รับทราบ ─── │  - ลงนามอิเล็กทรอนิกส์│
-        └─────────────┘                  └────────────────────────┘
-                       ▲
-                       │
-              ┌────────┴────────┐
-              │ รายงาน / Audit  │
-              │  (CSV, Charts)  │
-              └─────────────────┘
-```
+## กติกาหลักจาก QM-QMR-001-1 ที่ระบบบังคับใช้
 
-## ฟีเจอร์หลัก
+- **ระดับเอกสาร 4 ระดับ**: QM (คู่มือคุณภาพ) → SOP (แนวทางปฏิบัติ) →
+  WI (วิธีปฏิบัติงาน) → FM (แบบฟอร์ม) + เอกสารภายนอก (EXT)
+- **ระบบรหัส `AAA-BBB-XXX-YY`** — ระดับ-หน่วยงาน-ลำดับที่-ครั้งที่แก้ไข
+  ระบบออกรหัสให้อัตโนมัติเมื่ออนุมัติ (เช่น `SOP-PTC-001-1`)
+- **รหัสหน่วยงานจริง 29 หน่วย** — QMR, HRD, RMC, ICC, PCT, PTC, ENV, IM,
+  CHC, DEN, PHA, LAB, RAD, REH, NUT, HIS, ADM, PHC, TCM, PSY, MSO, NSO,
+  OPD, IPD, ER, OR, IC, LR, HD
+- **ตารางผู้มีอำนาจ** จัดทำ/ตรวจสอบ/อนุมัติ แตกต่างตามระดับเอกสาร
+  (ผู้แจกจ่าย/เรียกคืน/ทำลาย = QMR ทุกระดับ)
+- **การยกเลิก**: ประทับตรา "ยกเลิก" เก็บต้นฉบับ 1 ปีนับจากวันยกเลิก
+  แล้วจึงทำลาย — ระบบคำนวณวันครบกำหนดให้
 
-| โมดูล | คำอธิบาย |
-|---|---|
-| **แดชบอร์ด** | สรุปจำนวนเอกสาร, อัตราการรับทราบ, รายการเกินกำหนด, กิจกรรมล่าสุด |
-| **คลังเอกสาร** | ตารางเอกสารทั้งหมด พร้อมตัวกรองตามประเภท/แท็ก/คำค้น และ Version Control |
-| **อัปโหลด / สร้างใหม่** | ฟอร์มเพิ่มเอกสาร พร้อมสรุปอัตโนมัติด้วย AI (Google Gemini) |
-| **การจ่ายเอกสาร** | เลือกหน่วยงานปลายทาง, กำหนดวันครบรับทราบ, ส่งผ่าน Email / In-app / LINE |
-| **กล่องรับเอกสาร** | มุมมองของหน่วยงานปลายทาง — เปิดอ่าน, ลงนามรับทราบ, บันทึกหมายเหตุ |
-| **รายงาน & ตรวจสอบ** | ตารางรายหน่วยงาน, สัดส่วนเอกสาร, Export CSV สำหรับ Internal Audit |
+## โมดูลในระบบ
 
-## โครงสร้างข้อมูล
-
-- `Department` — หน่วยงานในโรงพยาบาล (OPD, IPD, ER, LAB, …)
-- `User` — ผู้ใช้ พร้อมบทบาท (`qmr` / `dept_head` / `staff` / `admin`)
-- `QualityDocument` — เอกสารคุณภาพ (รหัส, ชื่อ, ประเภท, เวอร์ชัน, สถานะ, ความสำคัญ)
-- `Distribution` — ชุดการจ่ายเอกสาร 1 ครั้ง พร้อมรายชื่อ `recipients`
-- `DistributionRecipient` — สถานะรับทราบรายหน่วยงาน (`pending` / `opened` / `acknowledged` / `overdue`)
-- `Activity` — Audit log
+| หน้า | ทำหน้าที่ | อ้างอิงใน QM |
+|---|---|---|
+| แดชบอร์ด | ภาพรวมเอกสารควบคุม คำขอค้าง อัตรารับทราบ เอกสารรอทำลาย | — |
+| บัญชีเอกสารคุณภาพ | ทะเบียนกลาง ค้นหา/กรอง/expand ดูประวัติแก้ไข + Export CSV | FM-QMR-002 |
+| ขอขึ้นทะเบียน/แก้ไข | ฟอร์มดิจิทัล ขึ้นทะเบียนใหม่-แก้ไข-ยกเลิก พร้อม preview รหัส | FM-QMR-001 |
+| ตรวจสอบ & อนุมัติ | คิวศูนย์คุณภาพตรวจซ้ำซ้อน → เสนอผู้มีอำนาจลงนาม | ข้อ 6.1–6.2 |
+| การแจกจ่ายเอกสาร | แจกจ่ายเฉพาะเอกสารควบคุม เลือกหน่วยรับ ติดตามรับทราบ | ข้อ 6.2 |
+| กล่องรับเอกสาร | มุมมองหน่วยรับ เปิดอ่าน + ลงนามรับทราบ (เลือกหน่วยได้) | ข้อ 6.3 |
+| รายงาน & ตรวจสอบ | สัดส่วนตามระดับ สถานะรับทราบ รายหน่วยงาน เอกสารรอทำลาย | Internal Audit |
+| คู่มือระบบ | เนื้อหา QM-QMR-001-1 ฉบับอ่านในแอป ครบทุกหัวข้อ | ทั้งฉบับ |
 
 ## เทคโนโลยี
 
-- **Frontend**: React 19 + TypeScript + Vite 6 + Tailwind CSS v4
-- **UI**: Lucide React (ไอคอน) + Motion (animations)
-- **Backend (notification)**: Express 4 + Nodemailer
-- **Database / Storage**: Firebase (Firestore + Storage) — เปิดใช้งานเมื่อเซ็ต `VITE_FIREBASE_*`
-- **AI (optional)**: Google Gemini (`@google/genai`) สำหรับสรุปเนื้อหาเอกสาร
+- **Frontend**: React 19 + TypeScript + Vite 6 + Tailwind CSS v4 + Motion + Lucide
+- **State**: in-memory store ผ่าน `useSyncExternalStore` (โหมดสาธิต — รีเฟรชแล้วรีเซ็ต)
+- **Backend (option)**: Express + Nodemailer (`/api/notify`) สำหรับแจ้งเตือนอีเมล
+- **พร้อมต่อยอด**: Firebase (Firestore/Storage) เปิดใช้เมื่อเซ็ต `VITE_FIREBASE_*`,
+  Google Gemini (`@google/genai`) สำหรับช่วยสรุปเอกสาร
 
-> ในโหมดสาธิต ระบบใช้ **in-memory mock store** (`src/data/store.ts`) จึงรันได้ทันที
-> โดยไม่ต้องตั้งค่า Firebase
-
-## การติดตั้ง
+## การพัฒนา
 
 ```bash
 npm install
-cp .env.example .env       # ใส่ค่า SMTP / Firebase ตามต้องการ
-npm run dev                # เปิดเว็บ Vite ที่ http://localhost:5173
-npm run server             # (อีก terminal) เปิด Express ที่ :8080
+npm run dev                # เว็บที่ http://localhost:5173
+npm run server             # (อีก terminal) notification server ที่ :8080
+npm run build              # production build
 ```
 
-Vite จะ proxy `/api/*` ไปที่ Express ให้อัตโนมัติ
+Deploy อัตโนมัติขึ้น GitHub Pages ทุกครั้งที่ push เข้า `main`
+(`.github/workflows/deploy-pages.yml`)
 
-## โฟลเดอร์
+## โครงสร้างโค้ด
 
 ```
 src/
-├── App.tsx              # router + layout
-├── main.tsx
-├── components/          # Sidebar, Topbar, Badges, Card
-├── pages/               # Dashboard, Documents, Upload, Distribution, Inbox, Reports, Login
+├── App.tsx                  # layout + routing
+├── types.ts                 # domain types ตาม QM-QMR-001-1
+├── components/              # Sidebar, Topbar, Badges, Card
+├── pages/
+│   ├── Dashboard.tsx
+│   ├── Register.tsx         # บัญชีเอกสาร (FM-QMR-002)
+│   ├── RequestForm.tsx      # ใบขอขึ้นทะเบียน (FM-QMR-001)
+│   ├── Approvals.tsx        # คิวตรวจสอบ/อนุมัติ
+│   ├── Distribution.tsx     # แจกจ่าย + ติดตามรับทราบ
+│   ├── Inbox.tsx            # มุมมองหน่วยรับ
+│   ├── Reports.tsx          # รายงาน audit + เอกสารรอทำลาย
+│   └── Manual.tsx           # เนื้อหา QM-QMR-001-1
 ├── data/
-│   ├── seed.ts          # ข้อมูลตัวอย่าง
-│   └── store.ts         # in-memory store + actions
-├── lib/
-│   ├── firebase.ts      # Firebase init (เมื่อมี env var)
-│   └── format.ts        # ฟอร์แมตวันที่/ป้าย
-└── types.ts             # TypeScript domain types
+│   ├── seed.ts              # หน่วยงานจริง 29 หน่วย + เอกสารตัวอย่าง
+│   └── store.ts             # store + actions (ขอ/ตรวจ/อนุมัติ/แจกจ่าย/รับทราบ)
+└── lib/format.ts            # docCode(), ตารางผู้มีอำนาจ, ป้ายสถานะ
 
-server/
-└── index.ts             # Express + Nodemailer (/api/notify)
+server/index.ts              # Express + Nodemailer
 ```
 
 ## Roadmap
 
-- [ ] เชื่อม Firestore จริง (เปิด/ปิดผ่าน `firebaseEnabled` flag)
-- [ ] e-Signature ด้วย OTP จากอีเมลโรงพยาบาล
-- [ ] LINE Notify / LINE OA สำหรับช่องทาง `line`
-- [ ] เอกสารหมดอายุอัตโนมัติเมื่อถึง `reviewDate`
-- [ ] AI ดึงสาระสำคัญจาก PDF ด้วย Gemini multimodal
+- [ ] เชื่อม Firestore เก็บข้อมูลถาวร + Firebase Storage เก็บไฟล์ PDF ต้นฉบับ
+- [ ] ระบบล็อกอินตามบทบาท (QMR / ผู้อำนวยการ / หัวหน้าหน่วย / ผู้ปฏิบัติงาน)
+- [ ] แจ้งเตือน LINE OA และอีเมลอัตโนมัติเมื่อมีเอกสารใหม่/ใกล้ครบกำหนด
+- [ ] แจ้งเตือนทบทวนเอกสารตามรอบ และแจ้งเมื่อเอกสารยกเลิกครบ 1 ปี (ถึงกำหนดทำลาย)
+- [ ] AI ช่วยตรวจโครงสร้าง 7 หัวข้อของร่างเอกสารก่อนยื่น (Gemini)
