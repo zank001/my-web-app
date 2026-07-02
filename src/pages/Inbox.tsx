@@ -4,13 +4,19 @@ import Card from '../components/Card'
 import { AckBadge, LevelBadge } from '../components/Badges'
 import { actions, useStore } from '../data/store'
 import { docCode, formatDate, relativeTime } from '../lib/format'
+import { can } from '../lib/permissions'
 import type { Distribution, DistributionRecipient, QualityDocument } from '../types'
 
 export default function Inbox() {
   const depts = useStore((s) => s.departments)
   const docs = useStore((s) => s.documents)
   const dists = useStore((s) => s.distributions)
-  const [viewDept, setViewDept] = useState('OPD')
+  const me = useStore((s) => s.users.find((u) => u.id === s.currentUserId))
+  const canSwitch = me ? can.viewAnyInbox(me.role) : false
+  const [pickedDept, setPickedDept] = useState(me?.deptCode ?? 'OPD')
+  // ผู้ใช้ทั่วไป/ประธาน เห็นเฉพาะกล่องของหน่วยตนเอง · ศูนย์คุณภาพ/ผอ. สลับดูได้ทุกหน่วย
+  const viewDept = canSwitch ? pickedDept : (me?.deptCode ?? 'OPD')
+  const setViewDept = setPickedDept
 
   const inbox = dists
     .map((d) => ({ dist: d, recipient: d.recipients.find((r) => r.deptCode === viewDept) }))
@@ -30,16 +36,24 @@ export default function Inbox() {
             มุมมองหน่วยงานปลายทาง — เปิดอ่านและลงนามรับทราบเอกสารที่ QMR แจกจ่าย
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-slate-500">ดูในฐานะ</span>
-          <select
-            value={viewDept}
-            onChange={(e) => setViewDept(e.target.value)}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400"
-          >
-            {depts.map((d) => <option key={d.code} value={d.code}>{d.code} — {d.nameTh}</option>)}
-          </select>
-        </div>
+        {canSwitch ? (
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-500">ดูในฐานะ</span>
+            <select
+              value={viewDept}
+              onChange={(e) => setViewDept(e.target.value)}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400"
+            >
+              {depts.map((d) => <option key={d.code} value={d.code}>{d.code} — {d.nameTh}</option>)}
+            </select>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+            <span className="text-xs text-slate-500">หน่วยงานของคุณ:</span>{' '}
+            <span className="font-mono font-semibold text-brand-700">{dept?.code}</span>{' '}
+            <span className="text-slate-600">{dept?.nameTh}</span>
+          </div>
+        )}
       </div>
 
       {inbox.length === 0 ? (

@@ -1,10 +1,11 @@
-import { CheckCircle2, ClipboardCheck, ShieldCheck, Undo2, XCircle } from 'lucide-react'
+import { CheckCircle2, ClipboardCheck, Lock, ShieldCheck, Undo2, XCircle } from 'lucide-react'
 import { useState } from 'react'
 import Card from '../components/Card'
 import { RequestKindBadge, RequestStatusBadge } from '../components/Badges'
 import { actions, useStore } from '../data/store'
 import { approvalMatrix, docCode, formatDate, relativeTime } from '../lib/format'
-import type { DocLevel, DocRequest } from '../types'
+import { can } from '../lib/permissions'
+import type { DocLevel, DocRequest, User } from '../types'
 
 /** คิวงานศูนย์คุณภาพ: ตรวจสอบ (ข้อ 6.1) และเสนอผู้มีอำนาจอนุมัติ (ข้อ 6.2) */
 export default function Approvals() {
@@ -29,7 +30,7 @@ export default function Approvals() {
         </Card>
       ) : (
         <div className="space-y-4">
-          {active.map((r) => <RequestCard key={r.id} req={r} reviewerName={me?.name ?? 'ศูนย์คุณภาพ'} />)}
+          {active.map((r) => <RequestCard key={r.id} req={r} me={me} />)}
         </div>
       )}
 
@@ -55,13 +56,16 @@ export default function Approvals() {
   )
 }
 
-function RequestCard({ req, reviewerName }: { req: DocRequest; reviewerName: string }) {
+function RequestCard({ req, me }: { req: DocRequest; me?: User }) {
   const docs = useStore((s) => s.documents)
   const depts = useStore((s) => s.departments)
   const [comment, setComment] = useState('')
   const target = docs.find((d) => d.id === req.targetDocId)
   const dept = depts.find((d) => d.code === req.deptCode)
   const matrix = approvalMatrix[(req.level === 'EXT' ? 'SOP' : req.level) as Exclude<DocLevel, 'EXT'>]
+  const role = me?.role
+  const canReview = role ? can.reviewRequest(role) : false
+  const canApprove = role ? can.approve(role, req.level) : false
 
   return (
     <Card>
@@ -94,57 +98,65 @@ function RequestCard({ req, reviewerName }: { req: DocRequest; reviewerName: str
 
       <div className="mt-4 border-t border-slate-100 pt-3">
         {req.status === 'submitted' && (
-          <div className="space-y-2">
-            <div className="text-xs font-semibold text-slate-500">
-              ขั้นตอนที่ 1 — ศูนย์คุณภาพตรวจสอบความซ้ำซ้อน/รูปแบบ (ผู้ตรวจสอบ: {matrix.review})
+          canReview ? (
+            <div className="space-y-2">
+              <div className="text-xs font-semibold text-slate-500">
+                ขั้นตอนที่ 1 — ศูนย์คุณภาพตรวจสอบความซ้ำซ้อน/รูปแบบ (ผู้ตรวจสอบ: {matrix.review})
+              </div>
+              <input
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                placeholder="ความเห็นการตรวจสอบ…"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+              />
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => actions.qcReview(req.id, true, comment || 'ตรวจสอบแล้ว ไม่ต้องแก้ไขเอกสาร')}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+                >
+                  <ClipboardCheck size={16} /> ตรวจสอบผ่าน — เสนอลงนาม
+                </button>
+                <button
+                  onClick={() => actions.qcReview(req.id, false, comment || 'ตรวจสอบแล้ว ต้องแก้ไขเอกสาร')}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-100"
+                >
+                  <Undo2 size={16} /> ส่งกลับแก้ไข
+                </button>
+              </div>
             </div>
-            <input
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              placeholder="ความเห็นการตรวจสอบ…"
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
-            />
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => actions.qcReview(req.id, true, comment || 'ตรวจสอบแล้ว ไม่ต้องแก้ไขเอกสาร')}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-700"
-              >
-                <ClipboardCheck size={16} /> ตรวจสอบผ่าน — เสนอลงนาม
-              </button>
-              <button
-                onClick={() => actions.qcReview(req.id, false, comment || 'ตรวจสอบแล้ว ต้องแก้ไขเอกสาร')}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-100"
-              >
-                <Undo2 size={16} /> ส่งกลับแก้ไข
-              </button>
-            </div>
-          </div>
+          ) : (
+            <LockedNote text={`รอศูนย์คุณภาพตรวจสอบความซ้ำซ้อน/รูปแบบ (${matrix.review})`} />
+          )
         )}
 
         {req.status === 'reviewed' && (
-          <div className="space-y-2">
-            <div className="text-xs font-semibold text-slate-500">
-              ขั้นตอนที่ 2 — ผู้มีอำนาจลงนาม: <span className="text-slate-700">{matrix.approve}</span>
+          canApprove ? (
+            <div className="space-y-2">
+              <div className="text-xs font-semibold text-slate-500">
+                ขั้นตอนที่ 2 — ผู้มีอำนาจลงนาม: <span className="text-slate-700">{matrix.approve}</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => actions.approveRequest(req.id, me?.name ?? matrix.approve)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+                >
+                  <CheckCircle2 size={16} />
+                  {req.kind === 'new' ? 'อนุมัติ — ขึ้นทะเบียนเอกสารควบคุม' : req.kind === 'revise' ? 'อนุมัติ — ออกฉบับแก้ไขใหม่' : 'อนุมัติ — ประทับตรายกเลิก'}
+                </button>
+                <button
+                  onClick={() => actions.rejectRequest(req.id, me?.name ?? matrix.approve, 'ไม่อนุมัติ')}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+                >
+                  <XCircle size={16} /> ไม่อนุมัติ
+                </button>
+              </div>
+              <div className="text-[11px] text-slate-400">
+                เมื่ออนุมัติ ระบบจะออกรหัส ลงบัญชี FM-QMR-002 และบันทึกประวัติการแก้ไขให้อัตโนมัติ
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => actions.approveRequest(req.id, matrix.approve)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-              >
-                <CheckCircle2 size={16} />
-                {req.kind === 'new' ? 'อนุมัติ — ขึ้นทะเบียนเอกสารควบคุม' : req.kind === 'revise' ? 'อนุมัติ — ออกฉบับแก้ไขใหม่' : 'อนุมัติ — ประทับตรายกเลิก'}
-              </button>
-              <button
-                onClick={() => actions.rejectRequest(req.id, matrix.approve, 'ไม่อนุมัติ')}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
-              >
-                <XCircle size={16} /> ไม่อนุมัติ
-              </button>
-            </div>
-            <div className="text-[11px] text-slate-400">
-              เมื่ออนุมัติ ระบบจะออกรหัส ลงบัญชี FM-QMR-002 และบันทึกประวัติการแก้ไขให้อัตโนมัติ · ผู้ตรวจสอบ: {reviewerName}
-            </div>
-          </div>
+          ) : (
+            <LockedNote text={`ตรวจสอบผ่านแล้ว — รอผู้มีอำนาจลงนาม: ${matrix.approve}`} />
+          )
         )}
 
         {req.status === 'needs_fix' && (
@@ -156,3 +168,9 @@ function RequestCard({ req, reviewerName }: { req: DocRequest; reviewerName: str
     </Card>
   )
 }
+
+const LockedNote = ({ text }: { text: string }) => (
+  <div className="inline-flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+    <Lock size={13} /> {text} · คุณไม่มีสิทธิ์ดำเนินการขั้นนี้
+  </div>
+)

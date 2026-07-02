@@ -11,19 +11,25 @@ import Inbox from './pages/Inbox'
 import Reports from './pages/Reports'
 import Manual from './pages/Manual'
 import Login from './pages/Login'
+import { actions, useStore } from './data/store'
+import { canSeePage } from './lib/permissions'
 
 export default function App() {
   const [page, setPage] = useState<Page>('dashboard')
-  const [authed, setAuthed] = useState(true) // โหมดสาธิต: ล็อกอินอัตโนมัติ
   const [query, setQuery] = useState('')
+  const currentUserId = useStore((s) => s.currentUserId)
+  const me = useStore((s) => s.users.find((u) => u.id === s.currentUserId))
 
-  if (!authed) return <Login onLogin={() => setAuthed(true)} />
+  if (!currentUserId || !me) return <Login />
+
+  // กันเส้นทาง: ถ้าระดับผู้ใช้ไม่มีสิทธิ์เห็นหน้านี้ ให้กลับแดชบอร์ด
+  const activePage: Page = canSeePage(me.role, page) ? page : 'dashboard'
 
   const render = () => {
-    switch (page) {
+    switch (activePage) {
       case 'dashboard':    return <Dashboard onNavigate={setPage} />
       case 'register':     return <Register query={query} onQuery={setQuery} />
-      case 'request':      return <RequestForm onDone={() => setPage('approvals')} />
+      case 'request':      return <RequestForm onDone={() => setPage(canSeePage(me.role, 'approvals') ? 'approvals' : 'register')} />
       case 'approvals':    return <Approvals />
       case 'distribution': return <Distribution />
       case 'inbox':        return <Inbox />
@@ -35,13 +41,13 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-slate-50 text-slate-900">
-      <Sidebar current={page} onNavigate={setPage} onSignOut={() => setAuthed(false)} />
+      <Sidebar current={activePage} onNavigate={setPage} onSignOut={() => actions.logout()} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar onNavigate={setPage} query={query} onQuery={setQuery} />
         <main className="flex-1 overflow-y-auto scrollbar-thin">
           <AnimatePresence mode="wait">
             <motion.div
-              key={page}
+              key={activePage}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}

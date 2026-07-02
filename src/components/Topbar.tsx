@@ -1,5 +1,6 @@
 import { Bell, Search } from 'lucide-react'
 import { useStore } from '../data/store'
+import { roleColor, roleShort } from '../lib/permissions'
 import type { Page } from './Sidebar'
 
 export default function Topbar({
@@ -42,7 +43,13 @@ export default function Topbar({
         </div>
         <div className="leading-tight">
           <div className="text-xs font-semibold">{user?.name}</div>
-          <div className="text-[11px] text-slate-500">{user?.position} · ศูนย์คุณภาพ</div>
+          <div className="mt-0.5 flex items-center gap-1">
+            {user && (
+              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${roleColor[user.role]}`}>
+                {roleShort[user.role]}
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </header>

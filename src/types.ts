@@ -24,7 +24,14 @@ export interface Department {
   group: DeptGroup
 }
 
-export type Role = 'qmr' | 'director' | 'dept_head' | 'staff'
+/**
+ * ระดับผู้ใช้ 4 ระดับ อิงตารางผู้รับผิดชอบใน QM-QMR-001-1 หน้า 8
+ * - director : ผู้อำนวยการโรงพยาบาล (อนุมัติ QM/SOP และเป็นผู้มีอำนาจสูงสุด)
+ * - chair    : ประธานคณะกรรมการ/หัวหน้ากลุ่มงาน (อนุมัติ WI/FM)
+ * - qmr      : คณะกรรมการศูนย์คุณภาพ (ตรวจสอบ แจกจ่าย เรียกคืน ทำลาย)
+ * - staff    : ผู้ใช้ทั่วไป (ยื่นคำขอ ดูเอกสาร ลงนามรับทราบ)
+ */
+export type Role = 'director' | 'chair' | 'qmr' | 'staff'
 
 export interface User {
   id: string
