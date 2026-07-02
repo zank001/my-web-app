@@ -17,6 +17,8 @@ export default function Inbox() {
     .filter((x): x is { dist: Distribution; recipient: DistributionRecipient } => Boolean(x.recipient))
     .sort((a, b) => +new Date(b.dist.sentAt) - +new Date(a.dist.sentAt))
 
+  const pending = inbox.filter((x) => x.recipient.status !== 'acknowledged')
+  const acknowledged = inbox.filter((x) => x.recipient.status === 'acknowledged')
   const dept = depts.find((d) => d.code === viewDept)
 
   return (
@@ -47,13 +49,45 @@ export default function Inbox() {
           </div>
         </Card>
       ) : (
-        <ul className="space-y-3">
-          {inbox.map(({ dist, recipient }) => {
-            const doc = docs.find((d) => d.id === dist.documentId)
-            if (!doc) return null
-            return <InboxItem key={dist.id} dist={dist} doc={doc} recipient={recipient} />
-          })}
-        </ul>
+        <div className="space-y-6">
+          <section>
+            <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
+              รอลงนามรับทราบ
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">{pending.length}</span>
+            </h2>
+            {pending.length === 0 ? (
+              <Card>
+                <div className="py-6 text-center text-sm text-emerald-600">
+                  ✓ {dept?.nameTh ?? viewDept} ลงนามรับทราบครบทุกฉบับแล้ว
+                </div>
+              </Card>
+            ) : (
+              <ul className="space-y-3">
+                {pending.map(({ dist, recipient }) => {
+                  const doc = docs.find((d) => d.id === dist.documentId)
+                  if (!doc) return null
+                  return <InboxItem key={`${dist.id}-${viewDept}`} dist={dist} doc={doc} recipient={recipient} />
+                })}
+              </ul>
+            )}
+          </section>
+
+          {acknowledged.length > 0 && (
+            <section>
+              <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-500">
+                ลงนามรับทราบแล้ว
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">{acknowledged.length}</span>
+              </h2>
+              <ul className="space-y-3">
+                {acknowledged.map(({ dist, recipient }) => {
+                  const doc = docs.find((d) => d.id === dist.documentId)
+                  if (!doc) return null
+                  return <InboxItem key={`${dist.id}-${viewDept}`} dist={dist} doc={doc} recipient={recipient} />
+                })}
+              </ul>
+            </section>
+          )}
+        </div>
       )}
     </div>
   )
