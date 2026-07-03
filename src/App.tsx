@@ -1,11 +1,15 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
+import { Loader2 } from 'lucide-react'
 import Sidebar, { type Page } from './components/Sidebar'
 import Topbar from './components/Topbar'
 import Dashboard from './pages/Dashboard'
 import Register from './pages/Register'
 import RequestForm from './pages/RequestForm'
 import Approvals from './pages/Approvals'
+
+// โหลดแยก — สตูดิโอดึง docx + genai ที่ขนาดใหญ่ เข้ามาเฉพาะเมื่อเปิดใช้
+const Studio = lazy(() => import('./pages/Studio'))
 import Distribution from './pages/Distribution'
 import Inbox from './pages/Inbox'
 import Reports from './pages/Reports'
@@ -30,6 +34,11 @@ export default function App() {
       case 'dashboard':    return <Dashboard onNavigate={setPage} />
       case 'register':     return <Register query={query} onQuery={setQuery} />
       case 'request':      return <RequestForm onDone={() => setPage(canSeePage(me.role, 'approvals') ? 'approvals' : 'register')} />
+      case 'studio':       return (
+        <Suspense fallback={<div className="grid place-items-center py-24 text-slate-400"><Loader2 className="animate-spin" /></div>}>
+          <Studio onDone={() => setPage(canSeePage(me.role, 'approvals') ? 'approvals' : 'register')} />
+        </Suspense>
+      )
       case 'approvals':    return <Approvals />
       case 'distribution': return <Distribution />
       case 'inbox':        return <Inbox />

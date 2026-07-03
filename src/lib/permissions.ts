@@ -47,6 +47,7 @@ export const pageRoles: Record<Page, Role[] | 'all'> = {
   dashboard: 'all',
   register: 'all',
   request: 'all',
+  studio: 'all',
   approvals: ['qmr', 'chair', 'director'],
   distribution: ['qmr', 'director'],
   inbox: 'all',
