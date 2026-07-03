@@ -8,7 +8,7 @@ import Register from './pages/Register'
 import RequestForm from './pages/RequestForm'
 import Approvals from './pages/Approvals'
 
-// โหลดแยก — สตูดิโอดึง docx + genai ที่ขนาดใหญ่ เข้ามาเฉพาะเมื่อเปิดใช้
+// โหลดแยก — สตูดิโอดึง docx + Anthropic SDK ที่ขนาดใหญ่ เข้ามาเฉพาะเมื่อเปิดใช้
 const Studio = lazy(() => import('./pages/Studio'))
 import Distribution from './pages/Distribution'
 import Inbox from './pages/Inbox'
