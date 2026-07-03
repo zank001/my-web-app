@@ -152,17 +152,17 @@ export default function Studio({ onDone }: { onDone: () => void }) {
         <Card>
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex-1">
-              <label className="mb-1 block text-xs font-semibold text-slate-600">Google Gemini API key</label>
+              <label className="mb-1 block text-xs font-semibold text-slate-600">Claude (Anthropic) API key</label>
               <input
                 value={keyInput} onChange={(e) => setKeyInput(e.target.value)} type="password"
-                placeholder="วาง API key ที่ได้จาก Google AI Studio"
+                placeholder="วาง API key ที่ได้จาก Anthropic Console (ขึ้นต้นด้วย sk-ant-)"
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
               />
             </div>
             <button onClick={() => { setApiKey(keyInput); setShowKey(false) }} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">บันทึก</button>
           </div>
           <p className="mt-2 text-[11px] text-slate-400">
-            เก็บไว้ในเบราว์เซอร์ของคุณเท่านั้น (localStorage) · ขอ key ฟรีได้ที่ Google AI Studio · เว็บสาธิตจึงเรียก AI ฝั่งผู้ใช้
+            เก็บไว้ในเบราว์เซอร์ของคุณเท่านั้น (localStorage) · ขอ key ได้ที่ console.anthropic.com · ใช้โมเดล Claude Opus 4.8 · เว็บสาธิตจึงเรียก AI ฝั่งผู้ใช้
           </p>
         </Card>
       )}
