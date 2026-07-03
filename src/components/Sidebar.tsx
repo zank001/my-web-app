@@ -1,12 +1,12 @@
 import {
   BarChart3, BookOpenCheck, ClipboardCheck, FilePlus2, FileText,
-  Inbox as InboxIcon, LayoutDashboard, LogOut, Send, ShieldCheck,
+  Inbox as InboxIcon, LayoutDashboard, LogOut, PenLine, Send, ShieldCheck,
 } from 'lucide-react'
 import { useStore } from '../data/store'
 import { canSeePage, roleColor, roleLabel } from '../lib/permissions'
 
 export type Page =
-  | 'dashboard' | 'register' | 'request' | 'approvals'
+  | 'dashboard' | 'register' | 'request' | 'studio' | 'approvals'
   | 'distribution' | 'inbox' | 'reports' | 'manual'
 
 export default function Sidebar({
@@ -20,6 +20,7 @@ export default function Sidebar({
     { key: 'dashboard',    label: 'แดชบอร์ด',                icon: LayoutDashboard },
     { key: 'register',     label: 'บัญชีเอกสารคุณภาพ',       icon: FileText },
     { key: 'request',      label: 'ขอขึ้นทะเบียน/แก้ไข',     icon: FilePlus2 },
+    { key: 'studio',       label: 'สตูดิโอช่วยร่างเอกสาร',    icon: PenLine },
     { key: 'approvals',    label: 'ตรวจสอบ & อนุมัติ',       icon: ClipboardCheck, hint: pendingRequests },
     { key: 'distribution', label: 'การแจกจ่ายเอกสาร',        icon: Send },
     { key: 'inbox',        label: 'กล่องรับเอกสาร',          icon: InboxIcon },
