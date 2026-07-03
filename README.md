@@ -57,8 +57,9 @@ Firebase Auth email link/OTP ได้) จำ session ไว้ใน `localSto
 - **Frontend**: React 19 + TypeScript + Vite 6 + Tailwind CSS v4 + Motion + Lucide
 - **State**: in-memory store ผ่าน `useSyncExternalStore` (โหมดสาธิต — รีเฟรชแล้วรีเซ็ต)
 - **Backend (option)**: Express + Nodemailer (`/api/notify`) สำหรับแจ้งเตือนอีเมล
-- **AI**: Claude (`@anthropic-ai/sdk`, โมเดล `claude-opus-4-8`) ช่วยร่าง/ปรับข้อความในสตูดิโอ
-  — โหมดสาธิตเรียกจากเบราว์เซอร์ด้วย API key ของผู้ใช้ (ควรย้ายไปฝั่งเซิร์ฟเวอร์เมื่อใช้จริง)
+- **AI (เลือกผู้ให้บริการได้)**: Claude (`@anthropic-ai/sdk`), OpenAI, หรือ Google Gemini
+  — เลือกเจ้าและใส่ API key ของเจ้านั้นในสตูดิโอ (เก็บแยกกันใน localStorage) โหมดสาธิต
+  เรียกจากเบราว์เซอร์ด้วย key ของผู้ใช้ (ควรย้ายไปฝั่งเซิร์ฟเวอร์เมื่อใช้จริง)
 - **พร้อมต่อยอด**: Firebase (Firestore/Storage) เปิดใช้เมื่อเซ็ต `VITE_FIREBASE_*`
 
 ## การพัฒนา
