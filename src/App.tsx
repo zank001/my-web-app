@@ -8,9 +8,8 @@ import Register from './pages/Register'
 import RequestForm from './pages/RequestForm'
 import Approvals from './pages/Approvals'
 
-// โหลดแยก — สองหน้านี้ดึง docx / Anthropic SDK ที่ขนาดใหญ่ เข้ามาเฉพาะเมื่อเปิดใช้
+// โหลดแยก — สตูดิโอดึง docx + Anthropic SDK ที่ขนาดใหญ่ เข้ามาเฉพาะเมื่อเปิดใช้
 const Studio = lazy(() => import('./pages/Studio'))
-const DrugInfo = lazy(() => import('./pages/DrugInfo'))
 import Distribution from './pages/Distribution'
 import Inbox from './pages/Inbox'
 import Reports from './pages/Reports'
@@ -38,11 +37,6 @@ export default function App() {
       case 'studio':       return (
         <Suspense fallback={<div className="grid place-items-center py-24 text-slate-400"><Loader2 className="animate-spin" /></div>}>
           <Studio onDone={() => setPage(canSeePage(me.role, 'approvals') ? 'approvals' : 'register')} />
-        </Suspense>
-      )
-      case 'drugs':        return (
-        <Suspense fallback={<div className="grid place-items-center py-24 text-slate-400"><Loader2 className="animate-spin" /></div>}>
-          <DrugInfo />
         </Suspense>
       )
       case 'approvals':    return <Approvals />
