@@ -48,6 +48,7 @@ export const pageRoles: Record<Page, Role[] | 'all'> = {
   register: 'all',
   request: 'all',
   studio: 'all',
+  drugs: 'all',
   approvals: ['qmr', 'chair', 'director'],
   distribution: ['qmr', 'director'],
   inbox: 'all',
