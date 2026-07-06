@@ -25,16 +25,32 @@ function extractJson<T>(text: string): T {
   try {
     return JSON.parse(cleaned.slice(start, end + 1)) as T
   } catch {
-    throw new Error('อ่านคำตอบของ AI ไม่สำเร็จ ลองกดใหม่อีกครั้ง')
+    throw new Error(PARSE_ERROR)
   }
 }
 
-const asText = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
+const asText = (v: unknown): string => {
+  if (typeof v === 'string') return v.trim()
+  if (Array.isArray(v)) return v.map(asText).filter(Boolean).join('\n')
+  return ''
+}
 
 const asList = (v: unknown): string[] => {
-  if (Array.isArray(v)) return v.map((x) => asText(x) || asText((x as { text?: string })?.text)).filter(Boolean)
+  if (Array.isArray(v)) return v.map((x) => (typeof x === 'string' ? x.trim() : asText((x as { text?: string })?.text))).filter(Boolean)
   const s = asText(v)
   return s ? s.split('\n').map((l) => l.replace(/^[-•*\s]+/, '').trim()).filter(Boolean) : []
+}
+
+const asBool = (v: unknown): boolean =>
+  v === true || (typeof v === 'string' && /^(true|yes|ใช่)$/i.test(v.trim()))
+
+const PARSE_ERROR = 'อ่านคำตอบของ AI ไม่สำเร็จ ลองกดใหม่อีกครั้ง'
+
+/** ยืนยันว่า JSON ที่ได้เป็น object (ยอมรับ array ก้อนเดียวที่ห่อ object มา) */
+const asRecord = (v: unknown): Record<string, unknown> => {
+  const o = Array.isArray(v) ? v[0] : v
+  if (!o || typeof o !== 'object' || Array.isArray(o)) throw new Error(PARSE_ERROR)
+  return o as Record<string, unknown>
 }
 
 /* ---------- 1) ข้อมูลยา (drug monograph) ---------- */
@@ -63,7 +79,7 @@ export async function aiDrugMonograph(drugName: string): Promise<DrugMonograph> 
     `ให้ข้อมูลยา "${drugName}" ตอบเป็น JSON เพียงอย่างเดียว (ห้ามมีข้อความอื่นนอก JSON) ตามโครงนี้:
 {
   "genericName": "ชื่อสามัญ (ภาษาอังกฤษ)",
-  "tradeNames": ["ชื่อการค้าที่พบบ่อยในไทย 2-4 ชื่อ"],
+  "tradeNames": ["ชื่อการค้าที่พบบ่อยในไทย เฉพาะที่มั่นใจจริงเท่านั้น ไม่แน่ใจให้เว้นเป็น []"],
   "drugClass": "กลุ่มยาและกลไกการออกฤทธิ์โดยย่อ",
   "indications": ["ข้อบ่งใช้หลัก"],
   "dosage": "ขนาดและวิธีใช้ทั่วไปในผู้ใหญ่ (และเด็กหากใช้บ่อย) แยกบรรทัดตามข้อบ่งใช้",
@@ -80,7 +96,7 @@ export async function aiDrugMonograph(drugName: string): Promise<DrugMonograph> 
     3000,
     DRUG_SYSTEM,
   )
-  const j = extractJson<Record<string, unknown>>(raw)
+  const j = asRecord(extractJson<unknown>(raw))
   return {
     genericName: asText(j.genericName) || drugName,
     tradeNames: asList(j.tradeNames),
@@ -93,8 +109,8 @@ export async function aiDrugMonograph(drugName: string): Promise<DrugMonograph> 
     interactions: asList(j.interactions),
     pregnancy: asText(j.pregnancy),
     storage: asText(j.storage),
-    highAlert: j.highAlert === true,
-    unknown: j.unknown === true,
+    highAlert: asBool(j.highAlert),
+    unknown: asBool(j.unknown),
     note: asText(j.note),
   }
 }
@@ -118,13 +134,16 @@ export interface DrugInteraction {
 
 export interface InteractionReport {
   summary: string
+  /** รายการที่โมเดลไม่รู้จักว่าเป็นยา — ผลตรวจใช้ไม่ได้กับชื่อเหล่านี้ */
+  unknownDrugs: string[]
   interactions: DrugInteraction[]
 }
 
+// เผื่อโมเดลตอบนอกคำที่กำหนด — คำกำกวมให้เอียงไปทางรุนแรงกว่า (ปลอดภัยกว่าแจ้งต่ำไป)
 const asSeverity = (v: unknown): InteractionSeverity => {
   const s = asText(v).toLowerCase()
-  if (s.includes('major') || s.includes('contraindicated') || s.includes('รุนแรง') || s.includes('ห้าม')) return 'major'
-  if (s.includes('minor') || s.includes('เล็กน้อย')) return 'minor'
+  if (/major|severe|serious|contraindicat|high|รุนแรง|ร้ายแรง|อันตราย|ห้าม|สูง/.test(s)) return 'major'
+  if (/minor|mild|เล็กน้อย|ต่ำ/.test(s)) return 'minor'
   return 'moderate'
 }
 
@@ -139,6 +158,7 @@ ${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}
 ตอบเป็น JSON เพียงอย่างเดียว (ห้ามมีข้อความอื่นนอก JSON) ตามโครงนี้:
 {
   "summary": "สรุปภาพรวมสั้นๆ 1-2 ประโยค",
+  "unknownDrugs": ["ชื่อในรายการที่ไม่ใช่ยาที่รู้จักหรือน่าจะสะกดผิด (ไม่มีให้ใส่ [])"],
   "interactions": [
     {
       "pair": ["ชื่อยา A", "ชื่อยา B"],
@@ -148,26 +168,27 @@ ${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}
     }
   ]
 }
-คู่ที่ไม่มีปฏิกิริยาที่มีนัยสำคัญไม่ต้องใส่ ถ้าไม่พบเลยให้ interactions เป็น []
-หากรายการใดไม่ใช่ชื่อยาที่รู้จัก ให้ระบุไว้ใน summary`,
+คู่ที่ไม่มีปฏิกิริยาที่มีนัยสำคัญไม่ต้องใส่ ถ้าไม่พบเลยให้ interactions เป็น []`,
     2500,
     DRUG_SYSTEM,
   )
-  const j = extractJson<Record<string, unknown>>(raw)
-  const items = Array.isArray(j.interactions) ? j.interactions : []
-  return {
-    summary: asText(j.summary),
-    interactions: items.map((it) => {
-      const o = (it ?? {}) as Record<string, unknown>
-      const pair = asList(o.pair)
-      return {
-        pair: [pair[0] ?? '', pair[1] ?? ''] as [string, string],
-        severity: asSeverity(o.severity),
-        effect: asText(o.effect),
-        advice: asText(o.advice),
-      }
-    }).filter((it) => it.pair[0] && it.effect),
-  }
+  // รูปแบบคำตอบที่ผิดโครงต้องกลายเป็น error เสมอ — ห้ามกลายเป็น "ไม่พบปฏิกิริยา" ปลอม
+  const parsed = extractJson<unknown>(raw)
+  const j = (Array.isArray(parsed) ? { interactions: parsed } : parsed) as Record<string, unknown>
+  if (!j || typeof j !== 'object' || !Array.isArray(j.interactions)) throw new Error(PARSE_ERROR)
+  const items = j.interactions
+  const interactions = items.map((it) => {
+    const o = (it ?? {}) as Record<string, unknown>
+    const pair = asList(o.pair)
+    return {
+      pair: [pair[0] ?? '', pair[1] ?? ''] as [string, string],
+      severity: asSeverity(o.severity),
+      effect: asText(o.effect),
+      advice: asText(o.advice),
+    }
+  }).filter((it) => it.pair[0] && it.effect)
+  if (items.length > 0 && interactions.length === 0) throw new Error(PARSE_ERROR)
+  return { summary: asText(j.summary), unknownDrugs: asList(j.unknownDrugs), interactions }
 }
 
 /* ---------- 3) ฉลากช่วย/คำแนะนำการใช้ยาสำหรับผู้ป่วย ---------- */

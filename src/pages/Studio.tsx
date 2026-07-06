@@ -148,7 +148,10 @@ export default function Studio({ onDone }: { onDone: () => void }) {
         </button>
       </div>
 
-      {showKey && <AiSettings onSaved={() => setShowKey(false)} />}
+      {/* คงคอมโพเนนต์ไว้ตอนซ่อน เพื่อไม่ทิ้งค่า key/โมเดลที่พิมพ์ค้างไว้ */}
+      <div className={showKey ? undefined : 'hidden'}>
+        <AiSettings onSaved={() => setShowKey(false)} />
+      </div>
 
       {err && <div className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-700">{err}</div>}
 
