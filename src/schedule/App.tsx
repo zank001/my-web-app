@@ -1,188 +1,236 @@
-import { lazy, Suspense, useMemo, useState } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
-import {
-  BarChart3, CalendarDays, ChevronLeft, ChevronRight, Clock, Download,
-  Eraser, Loader2, Sparkles, Users, Wand2,
-} from 'lucide-react'
-import { actions, getState, useSchedule } from './store'
-import { addDays, formatWeekRange, startOfWeek, todayISO, weekDates } from './lib/date'
-import { autoSchedule } from './lib/autoSchedule'
-import { exportRosterXlsx } from './lib/excel'
-import RosterGrid from './components/RosterGrid'
-import StaffManager from './components/StaffManager'
-import ShiftManager from './components/ShiftManager'
-import AiAssistant from './components/AiAssistant'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { AnimatePresence } from 'motion/react'
+import { CalendarDays, FileSpreadsheet, Loader2, Settings2, Pill } from 'lucide-react'
+import type { AppSettings, Duty, Holiday, ShiftType, Staff } from './types'
+import { loadData, saveData, genId, type RosterData } from './store'
+import { generateAutoDuties } from './lib/autoSchedule'
+import CalendarView from './components/CalendarView'
+import DayScheduleModal from './components/DayScheduleModal'
 
-// โหลดแยก — หน้าสถิติดึง recharts ที่ขนาดใหญ่ เข้ามาเฉพาะเมื่อเปิดแท็บนี้
-const Analytics = lazy(() => import('./components/Analytics'))
+// โหลดแยก — หน้าสรุปดึง ExcelJS ก้อนใหญ่ เข้ามาเฉพาะเมื่อเปิดแท็บนี้
+const SummaryView = lazy(() => import('./components/SummaryView'))
+const SettingsView = lazy(() => import('./components/SettingsView'))
 
-type Tab = 'roster' | 'analytics' | 'staff' | 'shifts'
+type Tab = 'calendar' | 'summary' | 'settings'
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: 'roster', label: 'ตารางเวร', icon: <CalendarDays size={16} /> },
-  { id: 'analytics', label: 'สถิติ / วิเคราะห์', icon: <BarChart3 size={16} /> },
-  { id: 'staff', label: 'บุคลากร', icon: <Users size={16} /> },
-  { id: 'shifts', label: 'ประเภทเวร', icon: <Clock size={16} /> },
+  { id: 'calendar', label: 'ปฏิทินจัดเวร', icon: <CalendarDays size={16} /> },
+  { id: 'summary', label: 'สรุปค่าตอบแทน', icon: <FileSpreadsheet size={16} /> },
+  { id: 'settings', label: 'ตั้งค่าระบบ', icon: <Settings2 size={16} /> },
 ]
 
+const FONT_SIZE_PX: Record<AppSettings['appearance']['fontSize'], number> = {
+  small: 14, medium: 16, large: 18,
+}
+
+// สีเน้นของส่วนหัว/แท็บ ตามธีมที่เลือกในหน้าตั้งค่า
+const THEME: Record<AppSettings['appearance']['themeColor'], { grad: string; text: string; ring: string }> = {
+  sky: { grad: 'from-blue-600 to-indigo-600', text: 'text-indigo-700', ring: 'border-indigo-600' },
+  emerald: { grad: 'from-emerald-600 to-teal-600', text: 'text-emerald-700', ring: 'border-emerald-600' },
+  slate: { grad: 'from-slate-700 to-slate-900', text: 'text-slate-800', ring: 'border-slate-800' },
+}
+
 export default function App() {
-  const weekStart = useSchedule((s) => s.weekStart)
-  const staff = useSchedule((s) => s.staff)
-  const shifts = useSchedule((s) => s.shifts)
-  const [tab, setTab] = useState<Tab>('roster')
-  const [aiOpen, setAiOpen] = useState(false)
-  const [toast, setToast] = useState('')
+  const [data, setData] = useState<RosterData>(() => loadData())
+  const { staff, duties, holidays, settings } = data
 
-  const dates = useMemo(() => weekDates(weekStart), [weekStart])
+  const [currentDate, setCurrentDate] = useState<Date>(() => new Date())
+  const [selectedDeptId, setSelectedDeptId] = useState<string>(() => data.settings.departments[0]?.id ?? '')
+  const [dayModalDate, setDayModalDate] = useState<string | null>(null)
+  const [tab, setTab] = useState<Tab>('calendar')
 
-  const flash = (msg: string) => {
-    setToast(msg)
-    window.setTimeout(() => setToast(''), 3500)
-  }
+  // บันทึกลง localStorage อัตโนมัติทุกครั้งที่ข้อมูลเปลี่ยน
+  useEffect(() => { saveData(data) }, [data])
 
-  const runAutoFill = () => {
-    const { assignments, unfilled } = autoSchedule(dates, shifts, staff, getState().assignments, { keepExisting: true })
-    actions.mergeAssignments(assignments)
-    flash(unfilled === 0 ? 'จัดเวรอัตโนมัติครบทุกช่องแล้ว' : `จัดเวรอัตโนมัติแล้ว — ยังขาดอีก ${unfilled} ตำแหน่ง (คนไม่พอ/ติดวันลา)`)
-  }
-
-  const clearWeek = () => {
-    if (confirm('ล้างการจัดเวรทั้งหมดของสัปดาห์นี้?')) {
-      actions.clearDates(dates)
-      flash('ล้างเวรของสัปดาห์นี้แล้ว')
+  // ถ้าหน่วยงานที่เลือกถูกลบ ให้กลับไปหน่วยงานแรก
+  useEffect(() => {
+    if (!settings.departments.some((d) => d.id === selectedDeptId)) {
+      setSelectedDeptId(settings.departments[0]?.id ?? '')
     }
+  }, [settings.departments, selectedDeptId])
+
+  const theme = THEME[settings.appearance.themeColor] ?? THEME.sky
+
+  // ---- ตัวช่วยแก้ไข state ----
+  const patch = (p: Partial<RosterData>) => setData((prev) => ({ ...prev, ...p }))
+
+  // ---- ปฏิทิน / เดือน ----
+  const goPrevMonth = () => setCurrentDate((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))
+  const goNextMonth = () => setCurrentDate((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1))
+
+  // ---- เวรรายวัน ----
+  const handleSaveDuty = (
+    assignedStaffIds: string[],
+    shiftId: ShiftType,
+    times?: { oncallStart?: string; oncallEnd?: string; specialStart?: string; specialEnd?: string },
+  ) => {
+    if (!dayModalDate) return
+    const newDuties: Duty[] = assignedStaffIds.map((staffId) => {
+      const duty: Duty = { id: genId(), date: dayModalDate, staffId, shiftId, departmentId: selectedDeptId }
+      if (shiftId === 'oncall') {
+        duty.oncallStartTime = times?.oncallStart
+        duty.oncallEndTime = times?.oncallEnd
+      } else if (shiftId === 'special') {
+        duty.specialStartTime = times?.specialStart
+        duty.specialEndTime = times?.specialEnd
+      }
+      return duty
+    })
+    patch({ duties: [...duties, ...newDuties] })
   }
 
-  const exportExcel = () => {
-    flash('กำลังเตรียมไฟล์ Excel…')
-    exportRosterXlsx(weekStart, dates, shifts, staff, getState().assignments)
-      .catch(() => flash('ส่งออกไฟล์ไม่สำเร็จ'))
+  const handleDeleteDuty = (dutyId: string) => {
+    patch({ duties: duties.filter((d) => d.id !== dutyId) })
   }
+
+  const handleAutoSchedule = () => {
+    const year = currentDate.getFullYear()
+    const month = currentDate.getMonth()
+    const deptStaff = staff.filter((s) => s.departmentId === selectedDeptId)
+    const added = generateAutoDuties(year, month, deptStaff, holidays, settings, duties, selectedDeptId)
+    if (added.length === 0) {
+      alert(
+        'ไม่มีเวรใหม่ที่จะจัด — ตรวจสอบว่าได้กำหนด “วันเวรประจำสัปดาห์” ให้บุคลากรในหน่วยงานนี้แล้ว\n' +
+        '(ตั้งค่า → บุคลากร → เลือกวันประจำสัปดาห์ของแต่ละคน)',
+      )
+      return
+    }
+    patch({ duties: [...duties, ...added] })
+    alert(`จัดตารางอัตโนมัติเรียบร้อย เพิ่มเวรใหม่ ${added.length} รายการในเดือนนี้`)
+  }
+
+  const handleClearMonth = () => {
+    const prefix = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-`
+    const target = duties.filter((d) => d.departmentId === selectedDeptId && d.date.startsWith(prefix))
+    if (target.length === 0) return alert('เดือนนี้ยังไม่มีเวรของหน่วยงานที่เลือก')
+    if (!confirm(`ล้างตารางเวรของหน่วยงานนี้ทั้งเดือน (${target.length} รายการ)?`)) return
+    patch({ duties: duties.filter((d) => !(d.departmentId === selectedDeptId && d.date.startsWith(prefix))) })
+  }
+
+  // ---- ตั้งค่า / วันหยุด / บุคลากร ----
+  const handleSaveSettings = (next: AppSettings) => patch({ settings: next })
+  const handleUpdateHolidays = (next: Holiday[]) => patch({ holidays: next })
+
+  const handleAddStaff = (input: Omit<Staff, 'id' | 'signature'>) => {
+    const s: Staff = { ...input, id: genId(), signature: '' }
+    patch({ staff: [...staff, s] })
+  }
+  const handleUpdateStaff = (id: string, fields: Partial<Staff>) => {
+    patch({ staff: staff.map((s) => (s.id === id ? { ...s, ...fields } : s)) })
+  }
+  const handleDeleteStaff = (id: string) => {
+    // ลบพนักงานและเวรทั้งหมดที่เกี่ยวข้อง
+    patch({ staff: staff.filter((s) => s.id !== id), duties: duties.filter((d) => d.staffId !== id) })
+  }
+
+  const dept = useMemo(
+    () => settings.departments.find((d) => d.id === selectedDeptId),
+    [settings.departments, selectedDeptId],
+  )
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-50 text-slate-900">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex w-full max-w-7xl items-center gap-3 px-6 py-4">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-brand-600 text-white shadow-sm">
-            <CalendarDays size={22} />
+    <div
+      className="flex min-h-screen flex-col bg-slate-100 text-slate-900"
+      style={{ fontSize: FONT_SIZE_PX[settings.appearance.fontSize] }}
+    >
+      <header className="border-b border-slate-200 bg-white no-print">
+        <div className="mx-auto flex w-full max-w-[1400px] items-center gap-3 px-6 py-3.5">
+          <div className={`grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br ${theme.grad} text-white shadow-sm`}>
+            <Pill size={20} />
           </div>
-          <div className="flex-1">
-            <div className="text-sm font-semibold leading-tight">จัดตารางเวรบุคลากร</div>
-            <div className="text-xs text-slate-500">โรงพยาบาลปาย · จัดเวร วิเคราะห์ความเป็นธรรม และส่งออก Excel</div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-bold leading-tight font-display">ระบบจัดตารางเวร &amp; ค่าตอบแทนนอกเวลาราชการ</div>
+            <div className="truncate text-xs text-slate-500">
+              {settings.hospitalInfo.hospitalName} · {settings.hospitalInfo.departmentName}
+              {dept ? ` · ${dept.name}` : ''}
+            </div>
           </div>
-          <button
-            onClick={() => setAiOpen(true)}
-            className="hidden items-center gap-1.5 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm font-medium text-brand-700 hover:bg-brand-100 sm:inline-flex"
-          >
-            <Sparkles size={16} /> ผู้ช่วย AI
-          </button>
+          <nav className="flex gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-bold transition cursor-pointer ${
+                  tab === t.id ? `bg-white shadow-sm ${theme.text}` : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                {t.icon}
+                <span className="hidden sm:inline">{t.label}</span>
+              </button>
+            ))}
+          </nav>
         </div>
       </header>
 
-      {/* แถบเครื่องมือ: เลื่อนสัปดาห์ + ปุ่มจัดการ */}
-      <div className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-2 px-6 py-3">
-          <div className="flex items-center gap-1 rounded-lg border border-slate-200 p-0.5">
-            <IconBtn onClick={() => actions.setWeekStart(addDays(weekStart, -7))} label="สัปดาห์ก่อน"><ChevronLeft size={18} /></IconBtn>
-            <button
-              onClick={() => actions.setWeekStart(startOfWeek(todayISO()))}
-              className="rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100"
-            >
-              สัปดาห์นี้
-            </button>
-            <IconBtn onClick={() => actions.setWeekStart(addDays(weekStart, 7))} label="สัปดาห์ถัดไป"><ChevronRight size={18} /></IconBtn>
-          </div>
-          <div className="mr-auto text-sm font-semibold text-slate-700">{formatWeekRange(weekStart)}</div>
+      <main className="mx-auto w-full max-w-[1400px] flex-1 p-6">
+        {tab === 'calendar' && (
+          <CalendarView
+            currentDate={currentDate}
+            staff={staff}
+            duties={duties}
+            holidays={holidays}
+            settings={settings}
+            selectedDeptId={selectedDeptId}
+            onSelectDeptId={setSelectedDeptId}
+            onOpenDayModal={setDayModalDate}
+            onAutoSchedule={handleAutoSchedule}
+            onClearMonth={handleClearMonth}
+            onPrevMonth={goPrevMonth}
+            onNextMonth={goNextMonth}
+          />
+        )}
 
-          <ToolBtn onClick={runAutoFill} icon={<Wand2 size={16} />}>จัดเวรอัตโนมัติ</ToolBtn>
-          <ToolBtn onClick={() => setAiOpen(true)} icon={<Sparkles size={16} />} className="sm:hidden">AI</ToolBtn>
-          <ToolBtn onClick={exportExcel} icon={<Download size={16} />}>ส่งออก Excel</ToolBtn>
-          <ToolBtn onClick={clearWeek} icon={<Eraser size={16} />} danger>ล้างสัปดาห์</ToolBtn>
-        </div>
-      </div>
+        {tab === 'summary' && (
+          <Suspense fallback={<div className="grid place-items-center py-24 text-slate-300"><Loader2 className="animate-spin" /></div>}>
+            <SummaryView
+              currentDate={currentDate}
+              staff={staff}
+              duties={duties}
+              holidays={holidays}
+              settings={settings}
+              selectedDeptId={selectedDeptId}
+            />
+          </Suspense>
+        )}
 
-      {/* แท็บ */}
-      <div className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex w-full max-w-7xl gap-1 overflow-x-auto scrollbar-thin px-6">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`inline-flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition ${
-                tab === t.id ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              {t.icon} {t.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <main className="mx-auto w-full max-w-7xl flex-1 p-6">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={tab}
-            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.16 }}
-          >
-            {tab === 'roster' && <RosterGrid dates={dates} />}
-            {tab === 'analytics' && (
-              <Suspense fallback={<div className="grid place-items-center py-24 text-slate-300"><Loader2 className="animate-spin" /></div>}>
-                <Analytics dates={dates} />
-              </Suspense>
-            )}
-            {tab === 'staff' && <StaffManager />}
-            {tab === 'shifts' && <ShiftManager />}
-          </motion.div>
-        </AnimatePresence>
+        {tab === 'settings' && (
+          <Suspense fallback={<div className="grid place-items-center py-24 text-slate-300"><Loader2 className="animate-spin" /></div>}>
+            <SettingsView
+              settings={settings}
+              holidays={holidays}
+              staff={staff}
+              onSaveSettings={handleSaveSettings}
+              onUpdateHolidays={handleUpdateHolidays}
+              onAddStaff={handleAddStaff}
+              onUpdateStaff={handleUpdateStaff}
+              onDeleteStaff={handleDeleteStaff}
+            />
+          </Suspense>
+        )}
       </main>
 
-      <footer className="border-t border-slate-200 bg-white">
-        <div className="mx-auto w-full max-w-7xl px-6 py-3 text-[11px] leading-relaxed text-slate-400">
-          ข้อมูลบันทึกไว้ในเบราว์เซอร์นี้ (localStorage) — เหมาะสำหรับการจัดเวรภายในหน่วยงาน
-          การจัดเวรอัตโนมัติเป็นเพียงข้อเสนอเริ่มต้น หัวหน้าเวรควรตรวจทานก่อนใช้จริง
+      <footer className="border-t border-slate-200 bg-white no-print">
+        <div className="mx-auto w-full max-w-[1400px] px-6 py-3 text-[11px] leading-relaxed text-slate-400">
+          ข้อมูลทั้งหมดบันทึกไว้ในเบราว์เซอร์นี้ (localStorage) — เหมาะสำหรับจัดเวรและออกใบเบิกค่าตอบแทนภายในหน่วยงาน
+          ตัวเลขค่าตอบแทนเป็นการคำนวณเบื้องต้น ควรตรวจทานกับระเบียบการเงินก่อนใช้จริง
         </div>
       </footer>
 
       <AnimatePresence>
-        {toast && (
-          <motion.div
-            initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
-            className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-full bg-slate-900 px-4 py-2 text-sm text-white shadow-lg"
-          >
-            {toast}
-          </motion.div>
+        {dayModalDate && (
+          <DayScheduleModal
+            dateStr={dayModalDate}
+            staff={staff}
+            duties={duties}
+            settings={settings}
+            holidays={holidays}
+            selectedDeptId={selectedDeptId}
+            onClose={() => setDayModalDate(null)}
+            onSave={handleSaveDuty}
+            onDeleteDuty={handleDeleteDuty}
+          />
         )}
       </AnimatePresence>
-
-      {aiOpen && <AiAssistant dates={dates} onClose={() => setAiOpen(false)} />}
     </div>
-  )
-}
-
-function IconBtn({ onClick, label, children }: { onClick: () => void; label: string; children: React.ReactNode }) {
-  return (
-    <button onClick={onClick} aria-label={label} className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100">
-      {children}
-    </button>
-  )
-}
-
-function ToolBtn({
-  onClick, icon, children, danger, className = '',
-}: {
-  onClick: () => void; icon: React.ReactNode; children: React.ReactNode; danger?: boolean; className?: string
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition ${
-        danger
-          ? 'border-slate-200 bg-white text-slate-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600'
-          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-      } ${className}`}
-    >
-      {icon} {children}
-    </button>
   )
 }

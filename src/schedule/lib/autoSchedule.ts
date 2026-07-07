@@ -1,92 +1,64 @@
-import type { Assignments, Shift, Staff } from '../types'
-import { cellKey } from '../types'
-import { fromISODate } from './date'
+import type { AppSettings, Duty, Holiday, Staff } from '../types'
+import { formatDateKey, getDaysInMonth } from '../utils'
+import { genId } from '../store'
 
 /**
- * จัดเวรอัตโนมัติแบบกำหนดผลได้ (deterministic) และกระจายงานให้เป็นธรรม
- * ไม่ต้องใช้ AI/อินเทอร์เน็ต — ใช้เป็นค่าตั้งต้นที่ผู้ใช้ปรับต่อได้
+ * จัดตารางเวรอัตโนมัติจาก "วันเวรประจำสัปดาห์" (defaultDays) ของบุคลากรแต่ละคน
  *
- * เงื่อนไขที่เคารพ:
- *  - ข้ามบุคลากรที่ปิดใช้งาน (active=false)
- *  - ไม่จัดในวันที่บุคลากรลา (unavailableWeekdays)
- *  - 1 คนได้ไม่เกิน 1 เวรต่อวัน
- *  - ไม่เกินจำนวนเวรสูงสุดต่อสัปดาห์ (maxPerWeek)
- *  - เลือกคนที่ถือเวรน้อยที่สุดก่อน (least-loaded) เพื่อความเป็นธรรม
+ * กติกา:
+ *  - จัดเฉพาะบุคลากรในหน่วยงานที่เลือก และเฉพาะวันที่ตรงกับ defaultDays ของเขา
+ *  - บุคลากรที่เป็น Oncall Only → ลงกะ Oncall, คนอื่น → เวรบ่ายในวันราชการ
+ *    และเวรเช้าในวันหยุด/เสาร์–อาทิตย์ (สอดคล้องกับค่าเริ่มต้นในหน้าจัดเวรรายวัน)
+ *  - ไม่สร้างซ้ำ ถ้ามีเวรของคน+วัน+กะ+หน่วยงานเดียวกันอยู่แล้ว
  *
- * options.keepExisting=true : เก็บคนที่จัดไว้แล้วในช่วงสัปดาห์ แล้วเติมที่ว่างเท่านั้น
+ * คืนค่าเฉพาะ "เวรใหม่" ที่ต้องเพิ่ม (ผู้เรียกนำไปต่อท้ายรายการเดิม)
  */
-export function autoSchedule(
-  dates: string[],
-  shifts: Shift[],
-  staff: Staff[],
-  existing: Assignments = {},
-  options: { keepExisting?: boolean } = {},
-): { assignments: Assignments; unfilled: number } {
-  const active = staff.filter((s) => s.active)
-  const orderedShifts = [...shifts].sort((a, b) => a.order - b.order)
+export function generateAutoDuties(
+  year: number,
+  month: number,
+  deptStaff: Staff[],
+  holidays: Holiday[],
+  settings: AppSettings,
+  existingDuties: Duty[],
+  departmentId: string,
+): Duty[] {
+  const holidaySet = new Set(holidays.map((h) => h.date))
+  const daysInMonth = getDaysInMonth(year, month)
 
-  // นับจำนวนเวรที่แต่ละคนถืออยู่ (นับเฉพาะที่จะเก็บไว้)
-  const load = new Map<string, number>()
-  active.forEach((s) => load.set(s.id, 0))
-  const usedOnDay = new Map<string, Set<string>>() // date → set(staffId) กันซ้ำวันเดียว
-  dates.forEach((d) => usedOnDay.set(d, new Set()))
+  // ชุดคีย์ของเวรที่มีอยู่แล้ว เพื่อกันซ้ำ
+  const existingKeys = new Set(
+    existingDuties.map((d) => `${d.date}__${d.staffId}__${d.shiftId}`),
+  )
 
-  const result: Assignments = {}
+  const added: Duty[] = []
 
-  if (options.keepExisting) {
-    for (const date of dates) {
-      for (const sh of orderedShifts) {
-        const key = cellKey(date, sh.id)
-        const kept = (existing[key] ?? []).filter((id) => load.has(id))
-        if (kept.length) {
-          result[key] = [...kept]
-          kept.forEach((id) => {
-            load.set(id, (load.get(id) ?? 0) + 1)
-            usedOnDay.get(date)!.add(id)
-          })
-        }
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = formatDateKey(year, month, day)
+    const weekday = new Date(dateStr + 'T00:00:00').getDay()
+    const isOffDay = weekday === 0 || weekday === 6 || holidaySet.has(dateStr)
+
+    for (const s of deptStaff) {
+      if (!s.defaultDays.includes(weekday)) continue
+
+      const shiftId = s.oncallOnly ? 'oncall' : isOffDay ? 'morning' : 'afternoon'
+      const key = `${dateStr}__${s.id}__${shiftId}`
+      if (existingKeys.has(key)) continue
+      existingKeys.add(key)
+
+      const duty: Duty = {
+        id: genId(),
+        date: dateStr,
+        staffId: s.id,
+        shiftId,
+        departmentId,
       }
+      if (shiftId === 'oncall') {
+        duty.oncallStartTime = settings.shiftTimes.oncall.start
+        duty.oncallEndTime = settings.shiftTimes.oncall.end
+      }
+      added.push(duty)
     }
   }
 
-  let unfilled = 0
-
-  for (const date of dates) {
-    const weekday = fromISODate(date).getDay()
-    for (const sh of orderedShifts) {
-      const key = cellKey(date, sh.id)
-      const current = result[key] ?? []
-      const need = sh.required - current.length
-      if (need <= 0) continue
-
-      // ผู้สมัครที่มีสิทธิ์: ว่างวันนั้น ยังไม่ถูกใช้ในวันนี้ และยังไม่เต็มโควตา
-      const candidates = active
-        .filter((s) => !s.unavailableWeekdays.includes(weekday))
-        .filter((s) => !usedOnDay.get(date)!.has(s.id))
-        .filter((s) => (load.get(s.id) ?? 0) < s.maxPerWeek)
-        // เรียงตามภาระน้อย→มาก, เสมอกันใช้ maxPerWeek มากก่อน แล้วชื่อ เพื่อให้ผลคงที่
-        .sort((a, b) => {
-          const la = load.get(a.id) ?? 0
-          const lb = load.get(b.id) ?? 0
-          if (la !== lb) return la - lb
-          if (a.maxPerWeek !== b.maxPerWeek) return b.maxPerWeek - a.maxPerWeek
-          return a.name.localeCompare(b.name, 'th')
-        })
-
-      const pick = candidates.slice(0, need)
-      if (pick.length < need) unfilled += need - pick.length
-
-      if (pick.length) {
-        result[key] = [...current, ...pick.map((s) => s.id)]
-        pick.forEach((s) => {
-          load.set(s.id, (load.get(s.id) ?? 0) + 1)
-          usedOnDay.get(date)!.add(s.id)
-        })
-      } else if (current.length === 0) {
-        // ปล่อยว่างไว้ (ไม่ต้องสร้างคีย์ว่าง)
-      }
-    }
-  }
-
-  return { assignments: result, unfilled }
+  return added
 }

@@ -1,20 +1,56 @@
-import type { Shift, Staff } from './types'
+import type { AppSettings, Holiday, Staff } from './types'
 
-// ข้อมูลตัวอย่างสำหรับสาธิต — กลุ่มงานการพยาบาล (เดโม)
-// ผู้ใช้แก้ไข/เพิ่ม/ลบได้ทั้งหมด และข้อมูลจะถูกบันทึกไว้ใน localStorage
+// ข้อมูลตั้งต้นสำหรับสาธิต (กลุ่มงานเภสัชกรรม โรงพยาบาลปาย) — แก้ไขได้ทั้งหมด
+// และถูกบันทึกลง localStorage โดยอัตโนมัติ
 
+export const defaultSettings = (): AppSettings => ({
+  hospitalInfo: {
+    hospitalName: 'โรงพยาบาลปาย',
+    departmentName: 'ฝ่ายเภสัชกรรม',
+    bossName: 'นายดิถี เหลืองธนะโภค',
+    bossTitle: 'หัวหน้าฝ่ายเภสัชกรรม',
+  },
+  appearance: { themeColor: 'sky', fontSize: 'medium' },
+  signatures: { scheduler: '', approver: '' },
+  shiftRates: {
+    pharmacist: 60,
+    technician: 45,
+    aide: 30,
+    nurse: 60,
+    doctor: 120,
+    dentist: 120,
+    medicalTech: 50,
+    radiologist: 50,
+    generalAdmin: 30,
+    other: 30,
+  },
+  shiftTimes: {
+    morning: { start: '08:30', end: '16:30' },
+    afternoon: { start: '16:30', end: '20:00' },
+    oncall: { start: '16:30', end: '08:30' },
+    special: { start: '08:30', end: '12:00' },
+  },
+  departments: [
+    { id: 'dept-pharmacy', name: 'ฝ่ายเภสัชกรรม (ภาพรวม)' },
+    { id: 'dept-opd', name: 'งานจ่ายยาผู้ป่วยนอก (OPD)' },
+    { id: 'dept-ipd', name: 'งานจ่ายยาผู้ป่วยใน (IPD)' },
+  ],
+})
+
+// ใช้ id เป็นเลขลำดับเพื่อให้เรียงในไฟล์สรุปได้สวยงาม (SummaryView เรียงตาม parseInt(id))
 export const seedStaff: Staff[] = [
-  { id: 'st-1', name: 'สมหญิง ใจดี',     role: 'พยาบาลวิชาชีพ', color: '#2f8fff', maxPerWeek: 5, unavailableWeekdays: [0], active: true },
-  { id: 'st-2', name: 'อรุณี แสงทอง',    role: 'พยาบาลวิชาชีพ', color: '#16a34a', maxPerWeek: 5, unavailableWeekdays: [], active: true },
-  { id: 'st-3', name: 'ปิยะ มั่นคง',      role: 'พยาบาลวิชาชีพ', color: '#f59e0b', maxPerWeek: 5, unavailableWeekdays: [6], active: true },
-  { id: 'st-4', name: 'ณัฐพล ก้าวหน้า',   role: 'พยาบาลวิชาชีพ', color: '#db2777', maxPerWeek: 6, unavailableWeekdays: [], active: true },
-  { id: 'st-5', name: 'กมล ศรีสุข',       role: 'ผู้ช่วยพยาบาล', color: '#7c3aed', maxPerWeek: 6, unavailableWeekdays: [3], active: true },
-  { id: 'st-6', name: 'วิภา ทองแท้',      role: 'ผู้ช่วยพยาบาล', color: '#0891b2', maxPerWeek: 6, unavailableWeekdays: [], active: true },
-  { id: 'st-7', name: 'ธนา รุ่งเรือง',    role: 'ผู้ช่วยเหลือคนไข้', color: '#dc2626', maxPerWeek: 6, unavailableWeekdays: [], active: true },
+  { id: '1', name: 'ภญ. สมหญิง ใจดี',   nickname: 'หญิง', type: 'pharmacist', color: '#2563eb', oncallOnly: true,  defaultDays: [1, 4], departmentId: 'dept-pharmacy', signature: '' },
+  { id: '2', name: 'ภก. ปิยะ มั่นคง',    nickname: 'ปิยะ', type: 'pharmacist', color: '#7c3aed', oncallOnly: true,  defaultDays: [2, 5], departmentId: 'dept-pharmacy', signature: '' },
+  { id: '3', name: 'นาง อรุณี แสงทอง',   nickname: 'อร',   type: 'technician', color: '#16a34a', oncallOnly: false, defaultDays: [1, 3, 5], departmentId: 'dept-pharmacy', signature: '' },
+  { id: '4', name: 'นาย ณัฐพล ก้าวหน้า', nickname: 'นัท',  type: 'technician', color: '#db2777', oncallOnly: false, defaultDays: [2, 4, 6], departmentId: 'dept-pharmacy', signature: '' },
+  { id: '5', name: 'นาง วิภา ทองแท้',     nickname: 'ภา',   type: 'aide',       color: '#0891b2', oncallOnly: false, defaultDays: [0, 6], departmentId: 'dept-pharmacy', signature: '' },
+  { id: '6', name: 'นาย ธนา รุ่งเรือง',   nickname: 'ธน',   type: 'aide',       color: '#ea580c', oncallOnly: false, defaultDays: [3, 0], departmentId: 'dept-pharmacy', signature: '' },
 ]
 
-export const seedShifts: Shift[] = [
-  { id: 'sh-morning', name: 'เวรเช้า', start: '08:00', end: '16:00', color: '#f59e0b', required: 2, order: 1 },
-  { id: 'sh-evening', name: 'เวรบ่าย', start: '16:00', end: '24:00', color: '#2f8fff', required: 2, order: 2 },
-  { id: 'sh-night',   name: 'เวรดึก', start: '00:00', end: '08:00', color: '#7c3aed', required: 1, order: 3 },
+// วันหยุดนักขัตฤกษ์ตัวอย่าง (พ.ศ. 2569 / ค.ศ. 2026)
+export const seedHolidays: Holiday[] = [
+  { date: '2026-07-28', name: 'วันเฉลิมพระชนมพรรษา ร.10', multiplier: 2 },
+  { date: '2026-08-12', name: 'วันแม่แห่งชาติ', multiplier: 1.5 },
+  { date: '2026-10-13', name: 'วันนวมินทรมหาราช', multiplier: 1.5 },
+  { date: '2026-12-05', name: 'วันชาติ / วันพ่อแห่งชาติ', multiplier: 1.5 },
 ]

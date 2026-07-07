@@ -1,46 +1,83 @@
-// โมเดลข้อมูลของแอปจัดตารางเวรบุคลากร (Staff Duty Roster)
-// ออกแบบให้ใช้กับกลุ่มงาน/หน่วยงานในโรงพยาบาล — จัดคนลงเวรตามวันและช่วงเวร
+// โมเดลข้อมูลของแอปจัดตารางเวร + สรุปค่าตอบแทนการปฏิบัติงานนอกเวลาราชการ
+// (กลุ่มงานเภสัชกรรม/หน่วยงานอื่นในโรงพยาบาล) — ใช้ร่วมกับคอมโพเนนต์ที่อัปโหลดมา
 
-/** บุคลากรที่ต้องจัดเข้าเวร */
+/** ประเภทวิชาชีพของบุคลากร — ใช้เป็นคีย์ของอัตราค่าตอบแทน (shiftRates) ด้วย */
+export type StaffType =
+  | 'pharmacist'
+  | 'technician'
+  | 'aide'
+  | 'nurse'
+  | 'doctor'
+  | 'dentist'
+  | 'medicalTech'
+  | 'radiologist'
+  | 'generalAdmin'
+  | 'other'
+
+/** ประเภทกะเวร */
+export type ShiftType = 'morning' | 'afternoon' | 'oncall' | 'special'
+
 export interface Staff {
   id: string
-  name: string
-  role: string              // ตำแหน่ง เช่น พยาบาลวิชาชีพ, เภสัชกร, ผู้ช่วยเหลือคนไข้
-  color: string             // สีประจำตัว (hex) ใช้แสดงในตาราง
-  maxPerWeek: number        // จำนวนเวรสูงสุดต่อสัปดาห์ (ใช้ตอนจัดเวรอัตโนมัติ)
-  unavailableWeekdays: number[] // วันที่ลา/ไม่สะดวก 0=อาทิตย์ … 6=เสาร์
-  active: boolean           // ปิดชั่วคราวได้โดยไม่ต้องลบ (เช่น ลาคลอด/ลาศึกษา)
+  name: string            // รวมคำนำหน้า เช่น "นาย สมชาย ใจดี"
+  nickname: string
+  type: StaffType
+  color: string           // hex ใช้แสดงในปฏิทิน
+  oncallOnly: boolean      // จัดได้เฉพาะเวร Oncall (เช่น เภสัชกรเวร)
+  defaultDays: number[]    // วันประจำสัปดาห์ (getDay() 0=อา..6=ส) สำหรับจัดเวรอัตโนมัติ
+  departmentId: string
+  signature?: string       // ลายมือชื่อ (base64 data URL)
 }
 
-/** ช่วงเวร เช่น เวรเช้า / เวรบ่าย / เวรดึก */
-export interface Shift {
+export interface Duty {
+  id: string
+  date: string            // yyyy-mm-dd
+  staffId: string
+  shiftId: ShiftType
+  departmentId: string
+  oncallStartTime?: string
+  oncallEndTime?: string
+  specialStartTime?: string
+  specialEndTime?: string
+}
+
+export interface Holiday {
+  date: string            // yyyy-mm-dd
+  name: string
+  multiplier: number      // ตัวคูณค่าตอบแทน (1, 1.5, 2)
+}
+
+export interface Department {
   id: string
   name: string
-  start: string             // "HH:MM"
-  end: string               // "HH:MM"
-  color: string             // hex
-  required: number          // จำนวนคนที่ต้องมีในเวรนี้ต่อวัน
-  order: number             // ลำดับการแสดง (เช้า→บ่าย→ดึก)
 }
 
-/**
- * ตารางเวร: map จาก "วันที่__รหัสเวร" → รายชื่อรหัสบุคลากร
- * เก็บเป็น object แบนราบเพื่อ persist ลง localStorage และค้นหา O(1)
- */
-export type Assignments = Record<string, string[]>
-
-export interface ScheduleState {
-  staff: Staff[]
-  shifts: Shift[]
-  assignments: Assignments
-  weekStart: string         // ISO date (yyyy-mm-dd) ของวันจันทร์ที่กำลังดู
+export interface ShiftTime {
+  start: string           // "HH:MM"
+  end: string
 }
 
-/** คีย์ของ 1 ช่องในตาราง (วัน + เวร) */
-export const cellKey = (dateISO: string, shiftId: string) => `${dateISO}__${shiftId}`
-
-/** แยกคีย์กลับเป็นวันและเวร */
-export const parseCellKey = (key: string): { date: string; shiftId: string } => {
-  const i = key.indexOf('__')
-  return { date: key.slice(0, i), shiftId: key.slice(i + 2) }
+export interface AppSettings {
+  hospitalInfo: {
+    hospitalName: string
+    departmentName: string
+    bossName?: string      // ชื่อผู้อนุมัติ (ใช้ในไฟล์ Excel)
+    bossTitle?: string
+  }
+  appearance: {
+    themeColor: 'sky' | 'emerald' | 'slate'
+    fontSize: 'small' | 'medium' | 'large'
+  }
+  signatures: {
+    scheduler: string      // ลายเซ็นผู้จัดทำเวร (base64)
+    approver: string       // ลายเซ็นผู้อนุมัติ (base64)
+  }
+  shiftRates: Record<StaffType, number>  // บาท/ชั่วโมง แยกตามวิชาชีพ
+  shiftTimes: {
+    morning: ShiftTime
+    afternoon: ShiftTime
+    oncall: ShiftTime
+    special: ShiftTime
+  }
+  departments: Department[]
 }
