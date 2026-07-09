@@ -184,13 +184,13 @@ backend/
 | Module | ตารางที่เป็นเจ้าของ |
 |---|---|
 | auth (core) | tenants, branches, users |
-| pos | sales, sale_items, sale_payments |
-| inventory | products, product_barcodes, drug_details, suppliers, lots, stock_levels, inventory_movements, purchase_orders, purchase_order_items, goods_receipts, goods_receipt_items |
+| pos | sales, sale_items, sale_payments, receipt_counters, receipt_number_ranges |
+| inventory | products, product_barcodes, drug_details, suppliers, lots, stock_levels, inventory_movements, reorder_rules, purchase_orders, purchase_order_items, goods_receipts, goods_receipt_items |
 | patients | patients, patient_allergies, patient_conditions |
-| cds | ddi_rules, allergy_cross_groups, cds_alerts |
+| cds | cds_rulesets, ddi_rules, drug_disease_rules, allergy_cross_groups, cds_alerts, antibiograms |
 | eprescription | prescriptions, prescription_items, dispense_records |
 | compliance | controlled_drug_registers, regulatory_reports, licenses |
-| crm | loyalty_tiers, point_transactions |
+| crm | loyalty_tiers, point_transactions, refill_reminders |
 | notifications | notifications |
 | core/audit | audit_logs |
 
@@ -223,16 +223,16 @@ ALTER TABLE sales ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sales FORCE ROW LEVEL SECURITY;   -- บังคับแม้แต่ owner
 
 CREATE POLICY tenant_isolation ON sales
-    USING (tenant_id = current_setting('app.current_tenant_id')::uuid)
-    WITH CHECK (tenant_id = current_setting('app.current_tenant_id')::uuid);
+    USING (tenant_id = current_setting('app.tenant_id')::uuid)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::uuid);
 
 -- จำกัดสาขา (optional ต่อ role): ผู้ใช้ระดับสาขาเห็นเฉพาะสาขาตัวเอง
--- ค่า 'app.current_branch_id' = '' หมายถึงระดับร้าน (OWNER) เห็นทุกสาขา
+-- ค่า 'app.branch_id' = '' หมายถึงระดับร้าน (OWNER) เห็นทุกสาขา
 CREATE POLICY branch_scope ON sales AS RESTRICTIVE
     USING (
-        current_setting('app.current_branch_id', true) IS NULL
-        OR current_setting('app.current_branch_id', true) = ''
-        OR branch_id = current_setting('app.current_branch_id')::uuid
+        current_setting('app.branch_id', true) IS NULL
+        OR current_setting('app.branch_id', true) = ''
+        OR branch_id = current_setting('app.branch_id')::uuid
     );
 ```
 
@@ -241,8 +241,8 @@ CREATE POLICY branch_scope ON sales AS RESTRICTIVE
 ```python
 # ทำใน transaction เดียวกับ query — ใช้ SET LOCAL เพื่อไม่รั่วข้าม pooled connection
 await session.execute(
-    text("SELECT set_config('app.current_tenant_id', :tid, true),"
-         "       set_config('app.current_branch_id', :bid, true)"),
+    text("SELECT set_config('app.tenant_id', :tid, true),"
+         "       set_config('app.branch_id', :bid, true)"),
     {"tid": str(ctx.tenant_id), "bid": str(ctx.branch_id or "")},
 )
 ```
@@ -467,8 +467,9 @@ sequenceDiagram
 - ทุกธุรกรรมมี **idempotency key (ULID สร้างที่ terminal)** — server เก็บ unique index
   → retry ได้ไม่เกิดใบเสร็จซ้ำ
 - ตัดสต็อกจริงเกิดที่ server เสมอ (single source of truth) — ตอน offline ตัดจาก snapshot
-  เพื่อแสดงผลเท่านั้น ถ้า sync แล้ว lot ไม่พอ ระบบสร้าง movement ติดลบพร้อมธง
-  `requires_review` ให้เภสัชกรเคลียร์ ไม่ block การบันทึกขาย
+  เพื่อแสดงผลเท่านั้น ถ้า sync แล้ว lot ไม่พอ ระบบสร้าง movement `ADJUST` ติดลบ
+  (พร้อม `reason` ระบุว่าเป็น offline oversell) + insert `notifications` ให้เภสัชกร
+  ตรวจสอบเคลียร์ ไม่ block การบันทึกขาย
 - catalog cache (products/ราคา/บาร์โค้ด/stock snapshot/DDI ชุดวิกฤต) refresh ทุก 15 นาที
   และหลัง reconnect ทันที
 - **การขายยาที่ต้องมีเภสัชกร/ยาควบคุมพิเศษตอน offline**: บังคับ role PHARMACIST
@@ -479,14 +480,17 @@ sequenceDiagram
 
 ข้อกำหนด: เลขใบเสร็จต่อสาขาต้องไม่ซ้ำ ไล่ลำดับตรวจสอบได้ และออกได้แม้ offline
 
-- **รูปแบบเลข**: `{branch_code}-{YYMM(พ.ศ.ย่อ)}-{running 6 หลัก}` เช่น `PAI01-6907-000123`
-- **ออนไลน์**: server ออกเลขจากตาราง `receipt_sequences (tenant_id, branch_id, period, last_number)`
-  อัปเดตด้วย `UPDATE ... SET last_number = last_number + 1 RETURNING` ใน transaction
+- **รูปแบบเลข**: `{branch_code}-{YYYYMM (ค.ศ. ตามเวลา Asia/Bangkok)}-{running 6 หลัก}`
+  เช่น `PAI01-202607-000123` — ถ้าต้องการแสดงปี พ.ศ. บนใบเสร็จ ให้เป็นการแสดงผลเท่านั้น
+  ไม่ใช่ค่าใน `receipt_no` (ตาม schema doc)
+- **ออนไลน์**: server ออกเลขจากตาราง `receipt_counters (tenant_id, branch_id, period, last_no)`
+  อัปเดตด้วย `UPDATE ... SET last_no = last_no + 1 RETURNING` ใน transaction
   เดียวกับ insert `sales` (row lock ธรรมชาติ → ไม่มี gap จาก rollback ที่มองข้าม
   transaction สำเร็จ) — ไม่ใช้ Postgres SEQUENCE เพราะ sequence ไม่ rollback ทำให้เลขโดด
 - **ออฟไลน์**: แต่ละ terminal **จองช่วงเลข (range allocation)** ล่วงหน้าตอนออนไลน์
   เช่น terminal A ได้ `000200–000299` บันทึกใน `receipt_number_ranges
-  (branch_id, terminal_id, range_start, range_end, issued_upto)` — ตอน offline ใช้เลข
+  (branch_id, terminal_id, period, range_start, range_end, issued_upto)` (DDL ใน schema doc
+  §3.4 — มี EXCLUDE constraint กันช่วงเลขทับซ้อน) — ตอน offline ใช้เลข
   จาก range ของตัวเอง จึง**ไม่ชนกันข้าม terminal/สาขาโดยโครงสร้าง** เมื่อใช้ถึง 80%
   และออนไลน์อยู่ ระบบจองช่วงถัดไปอัตโนมัติ
 - ผลข้างเคียงที่ยอมรับ: เลขใบเสร็จ *ไม่เรียงตามเวลาสนิท* ช่วงที่มี offline (range สลับกัน)
@@ -599,7 +603,7 @@ class PaymentProvider(Protocol):
 - โมดูล backend 8 โมดูลหลัก: `pos`, `inventory`, `patients`, `cds`, `eprescription`,
   `compliance`, `crm`, `reporting` (+ `auth` และ `notifications` เป็นโมดูลโครงสร้างพื้นฐาน)
   โครงชั้น router → service → repository และกติกาห้าม import ข้าม module
-- Multi-tenant: RLS + `app.current_tenant_id` / `app.current_branch_id` ผ่าน
+- Multi-tenant: RLS + `app.tenant_id` / `app.branch_id` ผ่าน
   `set_config(..., true)` — ทุกตาราง business มี `tenant_id`
 - Deployment ระยะแรก 6 containers: `caddy`, `api`, `worker`, `beat`, `postgres`, `redis`
 - เลขใบเสร็จ: per-branch sequence + offline range allocation ต่อ terminal
