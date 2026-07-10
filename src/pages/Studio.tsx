@@ -1,6 +1,6 @@
 import {
-  CheckCircle2, CornerUpLeft, Download, FileText, KeyRound, Loader2, Plus, Send,
-  Sparkles, Trash2, Wand2,
+  CheckCircle2, CornerUpLeft, Download, FileText, FileUp, KeyRound, Loader2, Plus,
+  Send, Sparkles, Trash2, Wand2, X,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import AiSettings from '../components/AiSettings'
@@ -10,6 +10,7 @@ import paiLogoSmUrl from '../assets/pai-logo-sm.png'
 import { actions, nextSeq, useStore } from '../data/store'
 import { docCode } from '../lib/format'
 import { aiDraftSection, aiSuggestFlow, hasApiKey } from '../lib/ai'
+import { extractDocxText, restructureDocument } from '../lib/importDoc'
 import { buildSopDocx, downloadBlob, type DocxImage, type SopSectionContent, type SopSignatory } from '../lib/docxTemplate'
 import { kindLabel, renderFlowSvg, svgToPng, type FlowNode, type NodeKind } from '../lib/flowchart'
 import type { DocLevel } from '../types'
@@ -59,6 +60,12 @@ export default function Studio({ onDone }: { onDone: () => void }) {
   const [submitted, setSubmitted] = useState(false)
   const [err, setErr] = useState('')
 
+  // นำเข้าเอกสารเดิมมาจัดรูปแบบตามแม่แบบ
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [importText, setImportText] = useState('')
+  const [importInfo, setImportInfo] = useState('')
+  const [importedCode, setImportedCode] = useState<string | null>(null)
+
   // หน้าปก & ผู้ลงนาม
   const [ownerLine, setOwnerLine] = useState('')
   const [orgLine, setOrgLine] = useState('') // ตราจริงมีชื่อโรงพยาบาลอยู่แล้ว — เว้นว่างได้
@@ -72,10 +79,13 @@ export default function Studio({ onDone }: { onDone: () => void }) {
   ])
 
   const dept = depts.find((d) => d.code === deptCode)
-  const code = useMemo(
+  // ใช้รหัสเดิมจากเอกสารที่นำเข้า (ถ้ามี) — ไม่งั้นออกรหัสใหม่จากลำดับถัดไป
+  const autoCode = useMemo(
     () => docCode({ level, deptCode, seq: nextSeq(level, deptCode), revision: 1 }),
     [level, deptCode],
   )
+  const code = importedCode ?? autoCode
+  const revision = Number(importedCode?.match(/-(\d{1,2})$/)?.[1] ?? 1)
   const logoPreview = useMemo(() => (logoFile ? URL.createObjectURL(logoFile) : paiLogoUrl), [logoFile])
 
   const setBody = (k: string, v: string) => setBodies((b) => ({ ...b, [k]: v }))
@@ -94,6 +104,28 @@ export default function Studio({ onDone }: { onDone: () => void }) {
     })
     setBody(s.key, text)
   }, `sec-${s.key}`)
+
+  /** นำเข้าเอกสารเดิม → แยกเนื้อหาเข้าหัวข้อมาตรฐาน แล้วเติมลงฟอร์มให้ตรวจแก้ */
+  const runImport = () => runAi(async () => {
+    let text = importText.trim()
+    if (importFile) {
+      text = importFile.name.toLowerCase().endsWith('.docx')
+        ? extractDocxText(await importFile.arrayBuffer())
+        : await importFile.text()
+    }
+    const r = await restructureDocument(text)
+    if (r.title) setTitle(r.title)
+    setBodies((b) => ({ ...b, ...r.sections }))
+    if (r.level) setLevel(r.level)
+    if (r.deptCode && depts.some((d) => d.code === r.deptCode)) setDeptCode(r.deptCode)
+    setImportedCode(r.code ?? null)
+    const n = Object.keys(r.sections).length
+    setImportInfo(
+      `${r.method === 'ai' ? 'AI จัดหมวดให้แล้ว' : 'จัดหมวดด้วยตัวช่วยพื้นฐาน (AI ไม่พร้อมใช้งาน)'} — เติม ${n} หัวข้อ` +
+      (r.title ? ` · ชื่อเรื่อง: ${r.title.slice(0, 40)}` : '') +
+      (r.code ? ` · ใช้รหัสเดิม ${r.code}` : ''),
+    )
+  }, 'import')
 
   const aiFlow = () => runAi(async () => {
     const steps = await aiSuggestFlow(title || 'กระบวนการปฏิบัติงาน', bodies.procedure)
@@ -137,7 +169,7 @@ export default function Studio({ onDone }: { onDone: () => void }) {
         headerLevelLine: headerLevelLine(meta), code,
         title: title || '(ยังไม่ระบุชื่อเรื่อง)',
         ownerLine: owner, orgLine: orgLine.trim() || undefined,
-        revision: 1, preparedNo,
+        revision, preparedNo,
         effectiveDate: new Date().toLocaleDateString('th-TH', { day: '2-digit', month: 'long', year: 'numeric' }),
         signatories: signatories.filter((s) => s.role.trim() || s.name.trim()),
         logo, logoCm, headerLogo,
@@ -201,6 +233,57 @@ export default function Studio({ onDone }: { onDone: () => void }) {
       <div className="grid gap-6 lg:grid-cols-3">
         {/* ซ้าย: เนื้อหา */}
         <div className="space-y-6 lg:col-span-2">
+          <Card title={<span className="flex items-center gap-2"><FileUp size={15} className="text-brand-600" /> นำเข้าเอกสารที่มีอยู่แล้ว — จัดรูปแบบตามแม่แบบอัตโนมัติ</span>}>
+            <p className="mb-3 text-[11px] text-slate-400">
+              แนบไฟล์เอกสารที่พิมพ์เองไว้ (.docx / .txt) หรือวางเนื้อหา แล้วระบบจะแยกเข้าหัวข้อมาตรฐาน 1-7
+              ตรวจจับรหัส/ระดับเอกสารให้ และจัดหน้า Word ใหม่ทั้งเล่มตามแม่แบบจริง (ปก · หัวกระดาษ · ฟอนต์ · ตารางลงนาม)
+            </p>
+            <div className="grid gap-3">
+              <input
+                type="file" accept=".docx,.txt"
+                onChange={(e) => { setImportFile(e.target.files?.[0] ?? null); setImportInfo('') }}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-brand-50 file:px-3 file:py-1 file:text-brand-700"
+              />
+              <textarea
+                value={importText} onChange={(e) => { setImportText(e.target.value); setImportInfo('') }} rows={3}
+                className={inputCls + ' resize-y'} placeholder="…หรือวางเนื้อหาเอกสารทั้งฉบับที่นี่ (ใช้เมื่อไม่ได้แนบไฟล์)"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={runImport} disabled={busy === 'import' || (!importFile && !importText.trim())}
+                  className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:bg-slate-300"
+                >
+                  {busy === 'import' ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
+                  จัดรูปแบบตามแม่แบบ
+                </button>
+                {importInfo && (
+                  <button
+                    onClick={buildDoc} disabled={busy === 'docx'}
+                    className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
+                  >
+                    {busy === 'docx' ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+                    ดาวน์โหลด Word (.docx)
+                  </button>
+                )}
+              </div>
+              {importInfo && (
+                <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                  ✓ {importInfo} — ตรวจแก้เนื้อหาในหัวข้อด้านล่างก่อนดาวน์โหลดได้
+                </div>
+              )}
+              {importedCode && (
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  ใช้รหัสเดิมจากเอกสาร: <span className="font-mono font-semibold text-brand-700">{importedCode}</span>
+                  <button onClick={() => setImportedCode(null)} title="กลับไปออกรหัสใหม่"
+                    className="grid h-5 w-5 place-items-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-rose-600">
+                    <X size={12} />
+                  </button>
+                  <span className="text-slate-400">(กด ✕ เพื่อออกรหัสใหม่ {autoCode})</span>
+                </div>
+              )}
+            </div>
+          </Card>
+
           <Card title="ข้อมูลเอกสาร">
             <div className="grid grid-cols-2 gap-4">
               <Field label="ระดับเอกสาร">
