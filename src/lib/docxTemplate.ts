@@ -85,6 +85,7 @@ const line = (text: string, bold = false, size = 16) =>
 function signatureTable(d: SopDocData): Table {
   const header = new TableRow({
     tableHeader: true,
+    cantSplit: true,
     children: [
       tcell([line(`รหัสเอกสาร ${d.code}`, true)], { span: 2, width: COL[0] + COL[1] }),
       tcell([line(`ทบทวน/แก้ไขครั้งที่ ${d.revision}`, true)], { width: COL[2] }),
@@ -94,6 +95,7 @@ function signatureTable(d: SopDocData): Table {
   })
 
   const bodyRows = d.signatories.map((s) => new TableRow({
+    cantSplit: true,
     children: [
       tcell([line(s.role)], { width: COL[0] }),
       tcell(s.position ? [line(s.name), line(s.position)] : [line(s.name)], { span: 2, width: COL[1] + COL[2] }),
@@ -165,15 +167,17 @@ function pageHeader(d: SopDocData): Header {
     columnWidths: HDR,
     rows: [
       new TableRow({
+        cantSplit: true,
         children: [
           tcell([logoPara], { rowSpan: 4, width: HDR[0] }),
           tcell([line(d.ownerLine)], { width: HDR[1] }),
           tcell([line(`รหัสเอกสาร ${d.code}`)], { width: HDR[2] }),
         ],
       }),
-      new TableRow({ children: [tcell([line(d.headerLevelLine)], { span: 2, width: HDR[1] + HDR[2] })] }),
-      new TableRow({ children: [tcell([line(`เรื่อง ${d.title}`)], { span: 2, width: HDR[1] + HDR[2] })] }),
+      new TableRow({ cantSplit: true, children: [tcell([line(d.headerLevelLine)], { span: 2, width: HDR[1] + HDR[2] })] }),
+      new TableRow({ cantSplit: true, children: [tcell([line(`เรื่อง ${d.title}`)], { span: 2, width: HDR[1] + HDR[2] })] }),
       new TableRow({
+        cantSplit: true,
         children: [
           tcell([line(`จัดทำครั้งที่ ${d.preparedNo}`)], { width: HDR[1] }),
           tcell([pageNo], { width: HDR[2] }),
@@ -201,8 +205,8 @@ function revisionTable(d: SopDocData, blankRows = 14): Table {
     width: { size: w[0] + w[1] + w[2], type: WidthType.DXA },
     columnWidths: w,
     rows: [
-      new TableRow({ tableHeader: true, children: [c('วันที่', 0, true), c('ทบทวน/แก้ไขครั้งที่', 1, true), c('บันทึกการแก้ไข', 2, true)] }),
-      new TableRow({ children: [c(d.effectiveDate, 0), c(String(d.revision), 1), c('อนุมัติใช้เอกสาร', 2)] }),
+      new TableRow({ tableHeader: true, cantSplit: true, children: [c('วันที่', 0, true), c('ทบทวน/แก้ไขครั้งที่', 1, true), c('บันทึกการแก้ไข', 2, true)] }),
+      new TableRow({ cantSplit: true, children: [c(d.effectiveDate, 0), c(String(d.revision), 1), c('อนุมัติใช้เอกสาร', 2)] }),
       ...Array.from({ length: blankRows }, blank),
     ],
   })
@@ -227,7 +231,7 @@ function contentChildren(d: SopDocData): (Paragraph | Table)[] {
       body.push(new Paragraph({ spacing: { after: 60, line: 300 }, children: [run('(ยังไม่ได้ระบุ)')] }))
     } else {
       lines.forEach((l) => body.push(new Paragraph({
-        alignment: AlignmentType.THAI_DISTRIBUTE,
+        alignment: AlignmentType.JUSTIFIED,
         indent: { firstLine: cm(1.0) },
         spacing: { after: 40, line: 300 },
         children: [run(l)],
@@ -262,6 +266,14 @@ const PAGE = {
   margin: { top: cm(1.91), bottom: cm(1.91), left: cm(2.54), right: cm(2.54), header: cm(1.25), footer: cm(1.25) },
 }
 
+/**
+ * หน้าเนื้อหาใช้ขอบบนกว้างกว่าหน้าปก — หัวกระดาษเป็นตาราง 4 แถวสูงจริง ~3 ซม.
+ * (บรรจุตราขนาด 2.93 ซม.) ซึ่งสูงกว่าระยะ header-to-margin เดิม (1.91-1.25=0.66 ซม.)
+ * มาก ถ้าใช้ขอบบน 1.91 ซม. เท่าหน้าปก โปรแกรมที่ไม่ขยายขอบให้อัตโนมัติ (เช่น WPS)
+ * จะวาดหัวกระดาษทับเนื้อหาบรรทัดแรกจนอ่านไม่ออก จึงเผื่อขอบบนให้พ้นหัวกระดาษเสมอ
+ */
+const CONTENT_PAGE = { ...PAGE, margin: { ...PAGE.margin, top: cm(4.6) } }
+
 export async function buildSopDocx(d: SopDocData): Promise<Blob> {
   const doc = new Document({
     styles: { default: { document: { run: { font: FONT, size: PT(16) } } } },
@@ -270,7 +282,7 @@ export async function buildSopDocx(d: SopDocData): Promise<Blob> {
       { properties: { page: PAGE }, children: coverChildren(d) },
       // ส่วนที่ 2: เนื้อหา — หัวกระดาษทุกหน้า, เริ่มนับหน้า 1 ใหม่
       {
-        properties: { page: { ...PAGE, pageNumbers: { start: 1, formatType: NumberFormat.DECIMAL } } },
+        properties: { page: { ...CONTENT_PAGE, pageNumbers: { start: 1, formatType: NumberFormat.DECIMAL } } },
         headers: { default: pageHeader(d) },
         children: contentChildren(d),
       },
