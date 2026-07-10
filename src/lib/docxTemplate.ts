@@ -1,126 +1,166 @@
 import {
-  AlignmentType, BorderStyle, Document, ImageRun, Packer, Paragraph,
-  Table, TableCell, TableRow, TextRun, WidthType,
+  AlignmentType, BorderStyle, Document, ImageRun, PageBreak, Packer, Paragraph,
+  Table, TableCell, TableRow, TextRun, VerticalAlign, WidthType,
 } from 'docx'
 
 /**
- * สร้างไฟล์ Word (.docx) ตามรูปแบบเอกสารคุณภาพ (อ้างอิงแม่แบบ SOP จริง)
+ * สร้างไฟล์ Word (.docx) ตามรูปแบบหน้าปกเอกสารคุณภาพจริง (แกะจาก หน้าปก.docx)
  * A4 · TH Sarabun New · ขอบบน-ล่าง 1.91 ซม. ซ้าย-ขวา 2.54 ซม. (ภาคผนวก 7.5)
+ *
+ * โครงหน้าปก: หัวเรื่องไทย/อังกฤษ (36pt) → เรื่อง (24pt) → ตรา (โลโก้)
+ * → ชื่อคณะกรรมการ/หน่วยงาน + โรงพยาบาล (28pt) → ตารางลงนาม (5 คอลัมน์)
  */
 
 const FONT = 'TH Sarabun New'
-const cm = (v: number) => Math.round(v * 566.9291) // ซม. → twips
-const PT = (v: number) => v * 2                    // pt → half-points
+const cm = (v: number) => Math.round(v * 566.9291)  // ซม. → twips
+const PT = (v: number) => v * 2                      // pt → half-points
+const px = (v: number) => Math.round((v / 2.54) * 96) // ซม. → px (96dpi) สำหรับรูปภาพ
 
 export interface SopSectionContent { label: string; body: string }
+export interface SopSignatory { role: string; name: string; position: string }
 
 export interface SopDocData {
   levelTitleTh: string   // เช่น แนวทางปฏิบัติ
-  levelTitleEn: string   // เช่น Standard Operating Procedure
+  levelTitleEn: string   // เช่น Standard Operating Procedure (SOP)
   code: string
-  title: string
-  orgName: string
+  title: string          // ชื่อเรื่อง (จะเติมคำว่า "เรื่อง " ให้)
+  ownerLine: string      // บรรทัดใต้ตรา เช่น คณะกรรมการเภสัชกรรมบำบัด
+  orgLine: string        // เช่น โรงพยาบาลปาย
   revision: number
-  preparedBy: string
-  reviewedBy: string
-  approvedBy: string
   effectiveDate: string
+  signatories: SopSignatory[]  // ผู้จัดทำ/ผู้ทบทวน/ผู้อนุมัติ
+  logo?: { data: Uint8Array; type: 'png' | 'jpg' }
+  logoCm?: number        // ขนาดตราด้านละ (ค่าเริ่มต้น 7.0 ซม.)
   sections: SopSectionContent[]
   flowPng?: { data: Uint8Array; width: number; height: number }
 }
 
-const run = (text: string, opts: { size?: number; bold?: boolean } = {}) =>
-  new TextRun({ text, font: FONT, size: PT(opts.size ?? 16), bold: opts.bold })
+const run = (text: string, o: { size?: number; bold?: boolean } = {}) =>
+  new TextRun({ text, font: FONT, size: PT(o.size ?? 16), bold: o.bold })
 
-const para = (text: string, opts: { size?: number; bold?: boolean; align?: (typeof AlignmentType)[keyof typeof AlignmentType]; spacing?: number } = {}) =>
+const centered = (text: string, o: { size?: number; bold?: boolean; before?: number; after?: number } = {}) =>
   new Paragraph({
-    alignment: opts.align,
-    spacing: { after: opts.spacing ?? 60, line: 276 },
-    children: text ? [run(text, opts)] : [],
+    alignment: AlignmentType.CENTER,
+    spacing: { before: o.before ?? 0, after: o.after ?? 60, line: 300 },
+    children: text ? [run(text, o)] : [],
   })
 
-const thinBorder = { style: BorderStyle.SINGLE, size: 4, color: '999999' }
-const cellBorders = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder }
+const thin = { style: BorderStyle.SINGLE, size: 4, color: '000000' } // ~0.5pt
+const cellBorders = { top: thin, bottom: thin, left: thin, right: thin }
 
-const cell = (text: string, opts: { bold?: boolean; width?: number } = {}) =>
-  new TableCell({
+/** ความกว้างคอลัมน์จริง 5 คอลัมน์ (ซม.) รวม 15.92 ซม. = พื้นที่พิมพ์ */
+const COL_CM = [2.92, 1.95, 5.86, 2.68, 2.51]
+const COL = COL_CM.map(cm)
+const TABLE_W = COL.reduce((a, b) => a + b, 0)
+
+function tcell(children: Paragraph[], opts: { span?: number; width: number }) {
+  return new TableCell({
     borders: cellBorders,
-    width: opts.width ? { size: opts.width, type: WidthType.PERCENTAGE } : undefined,
-    children: [para(text, { bold: opts.bold, spacing: 20 })],
+    columnSpan: opts.span,
+    width: { size: opts.width, type: WidthType.DXA },
+    verticalAlign: VerticalAlign.CENTER,
+    margins: { top: 40, bottom: 40, left: 80, right: 80 },
+    children,
+  })
+}
+
+const line = (text: string, bold = false) =>
+  new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 0, after: 0, line: 264 }, children: [run(text, { bold })] })
+
+/** ตารางลงนามหน้าปก — หัวตาราง merge คอลัมน์ 1-2, แถวลงนาม merge คอลัมน์ 2-3 */
+function signatureTable(d: SopDocData): Table {
+  const header = new TableRow({
+    tableHeader: true,
+    children: [
+      tcell([line(`รหัสเอกสาร ${d.code}`, true)], { span: 2, width: COL[0] + COL[1] }),
+      tcell([line(`ทบทวน/แก้ไขครั้งที่ ${d.revision}`, true)], { width: COL[2] }),
+      tcell([line('ลงลายมือชื่อ', true)], { width: COL[3] }),
+      tcell([line('วัน/เดือน/ปี', true)], { width: COL[4] }),
+    ],
   })
 
-function coverTable(d: SopDocData): Table {
-  return new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    rows: [
-      new TableRow({ children: [
-        cell(`รหัสเอกสาร ${d.code}`, { bold: true, width: 40 }),
-        cell('ทบทวน/แก้ไขครั้งที่', { bold: true, width: 20 }),
-        cell('ลงลายมือชื่อ', { bold: true, width: 22 }),
-        cell('วัน/เดือน/ปี', { bold: true, width: 18 }),
-      ] }),
-      new TableRow({ children: [ cell('ผู้จัดทำ'), cell(d.preparedBy), cell(''), cell('') ] }),
-      new TableRow({ children: [ cell('ผู้ทบทวน'), cell(d.reviewedBy), cell(''), cell('') ] }),
-      new TableRow({ children: [ cell('ผู้อนุมัติ'), cell(d.approvedBy), cell(''), cell('') ] }),
+  const bodyRows = d.signatories.map((s) => new TableRow({
+    children: [
+      tcell([line(s.role)], { width: COL[0] }),
+      tcell(s.position ? [line(s.name), line(s.position)] : [line(s.name)], { span: 2, width: COL[1] + COL[2] }),
+      tcell([line('')], { width: COL[3] }),
+      tcell([line('')], { width: COL[4] }),
     ],
+  }))
+
+  return new Table({
+    width: { size: TABLE_W, type: WidthType.DXA },
+    columnWidths: COL,
+    rows: [header, ...bodyRows],
   })
 }
 
 function revisionTable(d: SopDocData): Table {
+  const w = [cm(4.5), cm(4.0), cm(7.42)]
+  const c = (text: string, i: number, bold = false) =>
+    new TableCell({ borders: cellBorders, width: { size: w[i], type: WidthType.DXA }, margins: { top: 30, bottom: 30, left: 80, right: 80 }, children: [new Paragraph({ children: [run(text, { bold })] })] })
   return new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE },
+    width: { size: w[0] + w[1] + w[2], type: WidthType.DXA },
+    columnWidths: w,
     rows: [
-      new TableRow({ children: [
-        cell('วันที่', { bold: true, width: 30 }),
-        cell('ทบทวน/แก้ไขครั้งที่', { bold: true, width: 25 }),
-        cell('บันทึกการแก้ไข', { bold: true, width: 45 }),
-      ] }),
-      new TableRow({ children: [ cell(d.effectiveDate), cell(String(d.revision)), cell('อนุมัติใช้เอกสาร') ] }),
-      new TableRow({ children: [ cell(''), cell(''), cell('') ] }),
+      new TableRow({ tableHeader: true, children: [c('วันที่', 0, true), c('ทบทวน/แก้ไขครั้งที่', 1, true), c('บันทึกการแก้ไข', 2, true)] }),
+      new TableRow({ children: [c(d.effectiveDate, 0), c(String(d.revision), 1), c('อนุมัติใช้เอกสาร', 2)] }),
+      new TableRow({ children: [c('', 0), c('', 1), c('', 2)] }),
     ],
   })
 }
 
 export async function buildSopDocx(d: SopDocData): Promise<Blob> {
-  const children: (Paragraph | Table)[] = []
+  const cover: (Paragraph | Table)[] = []
 
-  // --- หน้าปก ---
-  children.push(para(d.levelTitleTh, { size: 36, bold: true, align: AlignmentType.CENTER, spacing: 40 }))
-  children.push(para(d.levelTitleEn, { size: 36, bold: true, align: AlignmentType.CENTER, spacing: 120 }))
-  children.push(para(`เรื่อง ${d.title}`, { size: 24, bold: true, align: AlignmentType.CENTER, spacing: 200 }))
-  children.push(para(d.orgName, { size: 28, bold: true, align: AlignmentType.CENTER, spacing: 300 }))
-  children.push(coverTable(d))
-  children.push(para('', { spacing: 200 }))
+  // หัวเรื่องไทย/อังกฤษ 36pt
+  cover.push(centered(d.levelTitleTh, { size: 36, bold: true, before: 800, after: 40 }))
+  cover.push(centered(d.levelTitleEn, { size: 36, bold: true, after: 200 }))
+  // เรื่อง 24pt
+  cover.push(centered(`เรื่อง ${d.title}`, { size: 24, bold: true, before: 120, after: 320 }))
 
-  // --- บันทึกการแก้ไขเอกสาร ---
-  children.push(para('บันทึกการแก้ไขเอกสาร', { bold: true, spacing: 80 }))
-  children.push(revisionTable(d))
-  children.push(para('', { spacing: 160 }))
+  // ตรา (โลโก้) กลางหน้า
+  if (d.logo) {
+    const side = px(d.logoCm ?? 7.0)
+    cover.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 240, after: 200, line: 240 },
+      children: [new ImageRun({ data: d.logo.data, type: d.logo.type, transformation: { width: side, height: side } })],
+    }))
+  }
 
-  // --- หัวข้อเนื้อหา ---
+  // ชื่อคณะกรรมการ/หน่วยงาน + โรงพยาบาล 28pt
+  cover.push(centered(d.ownerLine, { size: 28, bold: true, before: 120, after: 40 }))
+  cover.push(centered(d.orgLine, { size: 28, bold: true, after: 300 }))
+
+  // ตารางลงนาม
+  cover.push(signatureTable(d))
+
+  // ขึ้นหน้าใหม่สำหรับเนื้อหา
+  const body: (Paragraph | Table)[] = []
+  body.push(new Paragraph({ children: [new PageBreak()] }))
+
+  body.push(new Paragraph({ spacing: { after: 80 }, children: [run('บันทึกการแก้ไขเอกสาร', { bold: true })] }))
+  body.push(revisionTable(d))
+  body.push(new Paragraph({ spacing: { after: 160 }, children: [] }))
+
   d.sections.forEach((s, i) => {
-    children.push(para(`${i + 1}. ${s.label}`, { bold: true, spacing: 60 }))
+    body.push(new Paragraph({ spacing: { before: 40, after: 60, line: 300 }, children: [run(`${i + 1}. ${s.label}`, { bold: true })] }))
     const lines = s.body.split('\n').map((l) => l.trim()).filter(Boolean)
     if (lines.length === 0) {
-      children.push(para('(ยังไม่ได้ระบุ)', { spacing: 60 }))
+      body.push(new Paragraph({ spacing: { after: 60, line: 300 }, children: [run('(ยังไม่ได้ระบุ)')] }))
     } else {
-      lines.forEach((l) => children.push(para(l)))
+      lines.forEach((l) => body.push(new Paragraph({ spacing: { after: 40, line: 300 }, children: [run(l)] })))
     }
-    children.push(para('', { spacing: 60 }))
   })
 
-  // --- แผนผังขั้นตอน (ถ้ามี) ---
   if (d.flowPng) {
-    children.push(para('ภาคผนวก: แผนผังขั้นตอนการปฏิบัติงาน (Flow chart)', { bold: true, spacing: 80 }))
+    body.push(new Paragraph({ spacing: { before: 80, after: 80 }, children: [run('ภาคผนวก: แผนผังขั้นตอนการปฏิบัติงาน (Flow chart)', { bold: true })] }))
     const maxW = 420
     const scale = Math.min(1, maxW / d.flowPng.width)
-    children.push(new Paragraph({
+    body.push(new Paragraph({
       alignment: AlignmentType.CENTER,
-      children: [new ImageRun({
-        data: d.flowPng.data,
-        transformation: { width: Math.round(d.flowPng.width * scale), height: Math.round(d.flowPng.height * scale) },
-        type: 'png',
-      })],
+      children: [new ImageRun({ data: d.flowPng.data, type: 'png', transformation: { width: Math.round(d.flowPng.width * scale), height: Math.round(d.flowPng.height * scale) } })],
     }))
   }
 
@@ -130,10 +170,10 @@ export async function buildSopDocx(d: SopDocData): Promise<Blob> {
       properties: {
         page: {
           size: { width: cm(21), height: cm(29.7) },
-          margin: { top: cm(1.91), bottom: cm(1.91), left: cm(2.54), right: cm(2.54) },
+          margin: { top: cm(1.91), bottom: cm(1.91), left: cm(2.54), right: cm(2.54), header: cm(1.25), footer: cm(1.25) },
         },
       },
-      children,
+      children: [...cover, ...body],
     }],
   })
 
