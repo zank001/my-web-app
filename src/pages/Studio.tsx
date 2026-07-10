@@ -11,15 +11,15 @@ import {
   hasApiKey, providerKeyHint, providerLabel, providers, setApiKey, setModel, setProvider,
   type AiProvider,
 } from '../lib/ai'
-import { buildSopDocx, downloadBlob, type SopSectionContent } from '../lib/docxTemplate'
+import { buildSopDocx, downloadBlob, type SopSectionContent, type SopSignatory } from '../lib/docxTemplate'
 import { kindLabel, renderFlowSvg, svgToPng, type FlowNode, type NodeKind } from '../lib/flowchart'
 import type { DocLevel } from '../types'
 
 const LEVEL_META: Record<Exclude<DocLevel, 'EXT'>, { th: string; en: string }> = {
-  QM: { th: 'คู่มือคุณภาพ', en: 'Quality Manual' },
-  SOP: { th: 'แนวทางปฏิบัติ', en: 'Standard Operating Procedure' },
-  WI: { th: 'วิธีปฏิบัติงาน', en: 'Work Instruction' },
-  FM: { th: 'แบบฟอร์ม', en: 'Form' },
+  QM: { th: 'คู่มือคุณภาพ', en: 'Quality Manual (QM)' },
+  SOP: { th: 'แนวทางปฏิบัติ', en: 'Standard Operating Procedure (SOP)' },
+  WI: { th: 'วิธีปฏิบัติงาน', en: 'Work Instruction (WI)' },
+  FM: { th: 'แบบฟอร์ม', en: 'Form (FM)' },
 }
 
 const SECTIONS: { key: string; label: string; hint: string }[] = [
@@ -34,6 +34,24 @@ const SECTIONS: { key: string; label: string; hint: string }[] = [
 
 const uid = () => Math.random().toString(36).slice(2, 8)
 
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+/** สร้างตราตัวอย่าง (วงกลมเขียว) เมื่อผู้ใช้ยังไม่แนบตราจริง */
+function sealSvg(ownerTh: string, orgTh: string): { svg: string; width: number; height: number } {
+  const S = 300
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${S}" height="${S}" viewBox="0 0 ${S} ${S}" font-family="TH Sarabun New, Sarabun, sans-serif">` +
+    `<rect width="${S}" height="${S}" fill="#ffffff"/>` +
+    `<circle cx="150" cy="150" r="146" fill="#006743"/>` +
+    `<circle cx="150" cy="150" r="120" fill="none" stroke="#ffffff" stroke-width="3"/>` +
+    `<text x="150" y="120" text-anchor="middle" font-size="15" fill="#ffffff">MINISTRY OF PUBLIC HEALTH</text>` +
+    `<text x="150" y="152" text-anchor="middle" font-size="24" font-weight="bold" fill="#ffffff">${esc(orgTh)}</text>` +
+    `<text x="150" y="178" text-anchor="middle" font-size="13" fill="#ffffff">${esc(ownerTh.slice(0, 28))}</text>` +
+    `<text x="150" y="210" text-anchor="middle" font-size="11" fill="#bfe3d2">(ตราตัวอย่าง — แทนที่ด้วยตราจริง)</text>` +
+    `</svg>`
+  return { svg, width: S, height: S }
+}
+
 export default function Studio({ onDone }: { onDone: () => void }) {
   const depts = useStore((s) => s.departments)
   const me = useStore((s) => s.users.find((u) => u.id === s.currentUserId))
@@ -47,6 +65,17 @@ export default function Studio({ onDone }: { onDone: () => void }) {
     { id: uid(), kind: 'process', text: '' },
     { id: uid(), kind: 'end', text: 'สิ้นสุด' },
   ])
+  // หน้าปก & ผู้ลงนาม
+  const [ownerLine, setOwnerLine] = useState('')
+  const [orgLine, setOrgLine] = useState('โรงพยาบาลปาย')
+  const [logoFile, setLogoFile] = useState<File | null>(null)
+  const [logoCm, setLogoCm] = useState(7.0)
+  const [signatories, setSignatories] = useState<SopSignatory[]>([
+    { role: 'ผู้จัดทำ', name: me?.name ?? '', position: me?.position ?? '' },
+    { role: 'ผู้ทบทวน', name: '', position: '' },
+    { role: 'ผู้อนุมัติ', name: '', position: '' },
+  ])
+
   const [busy, setBusy] = useState<string | null>(null)
   const [showKey, setShowKey] = useState(false)
   const [prov, setProv] = useState<AiProvider>(getProvider())
@@ -104,19 +133,35 @@ export default function Studio({ onDone }: { onDone: () => void }) {
     setErr(''); setBusy('docx')
     try {
       const meta = LEVEL_META[level]
+      const owner = ownerLine.trim() || dept?.nameTh || deptCode
       const sections: SopSectionContent[] = SECTIONS.map((s) => ({ label: s.label, body: bodies[s.key] ?? '' }))
+
+      // แผนผัง flowchart → รูปในภาคผนวก
       let flowPng
-      const realNodes = nodes.filter((n) => n.text.trim())
-      if (realNodes.length >= 2) {
+      if (nodes.filter((n) => n.text.trim()).length >= 2) {
         const { svg, width, height } = renderFlowSvg(nodes)
         const data = await svgToPng(svg, width, height)
         flowPng = { data, width, height }
       }
+
+      // ตราโรงพยาบาล: ใช้ไฟล์ที่แนบ หรือสร้างตราตัวอย่าง
+      let logo: { data: Uint8Array; type: 'png' | 'jpg' }
+      if (logoFile) {
+        const buf = new Uint8Array(await logoFile.arrayBuffer())
+        logo = { data: buf, type: logoFile.type.includes('jpeg') || logoFile.type.includes('jpg') ? 'jpg' : 'png' }
+      } else {
+        const seal = sealSvg(owner, orgLine.trim() || 'โรงพยาบาล')
+        logo = { data: await svgToPng(seal.svg, seal.width, seal.height, 2), type: 'png' }
+      }
+
       const blob = await buildSopDocx({
         levelTitleTh: meta.th, levelTitleEn: meta.en, code,
-        title: title || '(ยังไม่ระบุชื่อเรื่อง)', orgName: dept?.nameTh ?? deptCode,
-        revision: 1, preparedBy: me?.name ?? '', reviewedBy: '', approvedBy: '',
+        title: title || '(ยังไม่ระบุชื่อเรื่อง)',
+        ownerLine: owner, orgLine: orgLine.trim() || 'โรงพยาบาลปาย',
+        revision: 1,
         effectiveDate: new Date().toLocaleDateString('th-TH', { day: '2-digit', month: 'long', year: 'numeric' }),
+        signatories: signatories.filter((s) => s.role.trim() || s.name.trim()),
+        logo, logoCm,
         sections, flowPng,
       })
       downloadBlob(blob, `${code}_ร่าง.docx`)
@@ -226,8 +271,67 @@ export default function Studio({ onDone }: { onDone: () => void }) {
                 </select>
               </Field>
               <Field label="ชื่อเรื่อง" className="col-span-2">
-                <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} placeholder="เช่น แนวทางปฏิบัติเพื่อป้องกันความคลาดเคลื่อนในการวินิจฉัย" />
+                <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} placeholder="เช่น การเบิกจ่ายยาเสพติดให้โทษและวัตถุออกฤทธิ์" />
               </Field>
+            </div>
+          </Card>
+
+          <Card title="หน้าปก & ผู้ลงนาม">
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="บรรทัดใต้ตรา (คณะกรรมการ/หน่วยงาน)" className="col-span-2">
+                <input value={ownerLine} onChange={(e) => setOwnerLine(e.target.value)} className={inputCls} placeholder={dept?.nameTh ?? 'เช่น คณะกรรมการเภสัชกรรมบำบัด'} />
+              </Field>
+              <Field label="ชื่อองค์กร">
+                <input value={orgLine} onChange={(e) => setOrgLine(e.target.value)} className={inputCls} placeholder="โรงพยาบาลปาย" />
+              </Field>
+              <Field label={`ขนาดตรา (ซม.) — ${logoCm.toFixed(1)}`}>
+                <input type="range" min={5} max={8} step={0.1} value={logoCm} onChange={(e) => setLogoCm(Number(e.target.value))} className="w-full accent-brand-600" />
+              </Field>
+              <Field label="แนบตราโรงพยาบาล (PNG/JPG) — เว้นว่างใช้ตราตัวอย่าง" className="col-span-2">
+                <input type="file" accept="image/png,image/jpeg" onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-brand-50 file:px-3 file:py-1 file:text-brand-700" />
+                {logoFile && <div className="mt-1 text-[11px] text-emerald-600">แนบแล้ว: {logoFile.name}</div>}
+              </Field>
+            </div>
+
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-600">ตารางลงนาม (ผู้จัดทำ/ทบทวน/อนุมัติ)</span>
+                <button
+                  type="button"
+                  onClick={() => setSignatories((s) => [...s, { role: 'ผู้ทบทวน', name: '', position: '' }])}
+                  className="inline-flex items-center gap-1 rounded-md border border-dashed border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-500 hover:border-brand-300 hover:text-brand-600"
+                >
+                  <Plus size={12} /> เพิ่มผู้ลงนาม
+                </button>
+              </div>
+              <div className="space-y-2">
+                {signatories.map((s, i) => (
+                  <div key={i} className="grid grid-cols-12 items-center gap-1.5">
+                    <select
+                      value={s.role}
+                      onChange={(e) => setSignatories((arr) => arr.map((x, j) => j === i ? { ...x, role: e.target.value } : x))}
+                      className="col-span-3 rounded-lg border border-slate-200 px-1.5 py-1.5 text-xs outline-none focus:border-brand-400"
+                    >
+                      {['ผู้จัดทำ', 'ผู้ทบทวน', 'ผู้อนุมัติ'].map((r) => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                    <input
+                      value={s.name} placeholder="ชื่อ-สกุล"
+                      onChange={(e) => setSignatories((arr) => arr.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
+                      className="col-span-4 rounded-lg border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-brand-400"
+                    />
+                    <input
+                      value={s.position} placeholder="ตำแหน่ง"
+                      onChange={(e) => setSignatories((arr) => arr.map((x, j) => j === i ? { ...x, position: e.target.value } : x))}
+                      className="col-span-4 rounded-lg border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-brand-400"
+                    />
+                    <button type="button" onClick={() => setSignatories((arr) => arr.filter((_, j) => j !== i))}
+                      className="col-span-1 grid h-7 place-items-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-rose-600">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           </Card>
 
