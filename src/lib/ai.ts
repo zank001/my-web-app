@@ -144,16 +144,55 @@ export async function aiDraftSection(ctx: SectionCtx): Promise<string> {
   return text
 }
 
-/** เสนอขั้นตอนสำหรับสร้างแผนผัง flowchart จากชื่อกระบวนการ */
-export async function aiSuggestFlow(processTitle: string): Promise<string[]> {
+export interface AiFlowStep {
+  text: string
+  kind: 'start' | 'process' | 'decision' | 'end'
+  /** ดัชนี (0-based) ของขั้นที่วนกลับไปเมื่อผลตัดสินใจไม่ผ่าน */
+  loopToIndex?: number
+}
+
+/** เสนอแผนผัง flowchart แบบมีโครงสร้าง (ขั้นตอน/จุดตัดสินใจ/เส้นวนกลับ) */
+export async function aiSuggestFlow(processTitle: string, procedureText?: string): Promise<AiFlowStep[]> {
+  const ctx = procedureText?.trim()
+    ? `\n\nรายละเอียดขั้นตอนที่ผู้ใช้ร่างไว้ (ใช้เป็นข้อมูลประกอบ):\n${procedureText.slice(0, 2000)}`
+    : ''
   const text = await complete(
-    `เสนอขั้นตอนการปฏิบัติงานของกระบวนการ "${processTitle}" เป็นลำดับขั้น
-ตอบเป็นรายการขั้นตอนสั้นๆ บรรทัดละ 1 ขั้น (5-8 ขั้น) ไม่ต้องใส่เลขลำดับ`,
-    1000,
+    `ออกแบบ Flow chart การดำเนินงานของกระบวนการ "${processTitle}" สำหรับเอกสารคุณภาพโรงพยาบาล${ctx}
+
+ตอบเป็น JSON array เท่านั้น (ไม่มีข้อความอื่น) รูปแบบ:
+[{"text":"...","kind":"start|process|decision|end","loopToIndex":0}]
+กติกา:
+- ขั้นแรก kind="start" ขั้นสุดท้าย kind="end" (ข้อความสั้นๆ เช่น ชื่อจุดเริ่ม/สิ้นสุดของงาน)
+- รวม 6-10 ขั้น ข้อความแต่ละขั้นสั้น กระชับ (ไม่เกิน ~45 อักษร)
+- จุดที่ต้องตรวจสอบ/อนุมัติ ให้ใช้ kind="decision" ข้อความสั้นมาก (เช่น "อนุมัติ", "ผ่านการตรวจสอบ")
+- decision ใส่ "loopToIndex" เป็นดัชนีของขั้นก่อนหน้าที่ต้องวนกลับไปเมื่อไม่ผ่าน (0-based)`,
+    1500,
   )
-  return text
-    .split('\n')
-    .map((l) => l.replace(/^[\d.\-*)\s]+/, '').trim())
-    .filter(Boolean)
-    .slice(0, 10)
+
+  // พยายามอ่าน JSON (ตัด code fence ถ้ามี) — ถ้าไม่ได้ ถอยไปอ่านเป็นบรรทัดละขั้น
+  const jsonText = text.replace(/^```(?:json)?/m, '').replace(/```\s*$/m, '').trim()
+  const start = jsonText.indexOf('[')
+  const end = jsonText.lastIndexOf(']')
+  if (start >= 0 && end > start) {
+    try {
+      const arr = JSON.parse(jsonText.slice(start, end + 1)) as Array<Record<string, unknown>>
+      const kinds = ['start', 'process', 'decision', 'end']
+      const steps = arr
+        .filter((s) => typeof s?.text === 'string' && (s.text as string).trim())
+        .map((s): AiFlowStep => ({
+          text: (s.text as string).trim(),
+          kind: kinds.includes(s.kind as string) ? (s.kind as AiFlowStep['kind']) : 'process',
+          loopToIndex: typeof s.loopToIndex === 'number' && s.loopToIndex >= 0 ? s.loopToIndex : undefined,
+        }))
+        .slice(0, 12)
+      if (steps.length >= 2) return steps
+    } catch { /* ตกไปใช้แบบบรรทัด */ }
+  }
+  const lines = text.split('\n').map((l) => l.replace(/^[\d.\-*)\s]+/, '').trim()).filter(Boolean).slice(0, 10)
+  if (!lines.length) throw new Error('AI ไม่ได้ส่งขั้นตอนกลับมา')
+  return [
+    { text: 'เริ่มต้น', kind: 'start' },
+    ...lines.map((t): AiFlowStep => ({ text: t, kind: 'process' })),
+    { text: 'สิ้นสุด', kind: 'end' },
+  ]
 }

@@ -1,14 +1,16 @@
 import {
-  CheckCircle2, Download, FileText, KeyRound, Loader2, Plus, Send,
+  CheckCircle2, CornerUpLeft, Download, FileText, KeyRound, Loader2, Plus, Send,
   Sparkles, Trash2, Wand2,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import AiSettings from '../components/AiSettings'
 import Card from '../components/Card'
+import paiLogoUrl from '../assets/pai-logo.png'
+import paiLogoSmUrl from '../assets/pai-logo-sm.png'
 import { actions, nextSeq, useStore } from '../data/store'
 import { docCode } from '../lib/format'
 import { aiDraftSection, aiSuggestFlow, hasApiKey } from '../lib/ai'
-import { buildSopDocx, downloadBlob, type SopSectionContent, type SopSignatory } from '../lib/docxTemplate'
+import { buildSopDocx, downloadBlob, type DocxImage, type SopSectionContent, type SopSignatory } from '../lib/docxTemplate'
 import { kindLabel, renderFlowSvg, svgToPng, type FlowNode, type NodeKind } from '../lib/flowchart'
 import type { DocLevel } from '../types'
 
@@ -31,23 +33,13 @@ const SECTIONS: { key: string; label: string; hint: string }[] = [
 
 const uid = () => Math.random().toString(36).slice(2, 8)
 
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+/** โหลดไฟล์ asset (ตราโรงพยาบาลปายที่ฝังมากับระบบ) เป็น Uint8Array */
+const fetchAsset = async (url: string): Promise<Uint8Array> =>
+  new Uint8Array(await (await fetch(url)).arrayBuffer())
 
-/** สร้างตราตัวอย่าง (วงกลมเขียว) เมื่อผู้ใช้ยังไม่แนบตราจริง */
-function sealSvg(ownerTh: string, orgTh: string): { svg: string; width: number; height: number } {
-  const S = 300
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${S}" height="${S}" viewBox="0 0 ${S} ${S}" font-family="TH Sarabun New, Sarabun, sans-serif">` +
-    `<rect width="${S}" height="${S}" fill="#ffffff"/>` +
-    `<circle cx="150" cy="150" r="146" fill="#006743"/>` +
-    `<circle cx="150" cy="150" r="120" fill="none" stroke="#ffffff" stroke-width="3"/>` +
-    `<text x="150" y="120" text-anchor="middle" font-size="15" fill="#ffffff">MINISTRY OF PUBLIC HEALTH</text>` +
-    `<text x="150" y="152" text-anchor="middle" font-size="24" font-weight="bold" fill="#ffffff">${esc(orgTh)}</text>` +
-    `<text x="150" y="178" text-anchor="middle" font-size="13" fill="#ffffff">${esc(ownerTh.slice(0, 28))}</text>` +
-    `<text x="150" y="210" text-anchor="middle" font-size="11" fill="#bfe3d2">(ตราตัวอย่าง — แทนที่ด้วยตราจริง)</text>` +
-    `</svg>`
-  return { svg, width: S, height: S }
-}
+/** บรรทัดระดับเอกสารในหัวกระดาษ เช่น "คู่มือคุณภาพ (Quality Manual)" */
+const headerLevelLine = (meta: { th: string; en: string }) =>
+  `${meta.th} (${meta.en.replace(/\s*\((?:QM|SOP|WI|FM)\)$/, '')})`
 
 export default function Studio({ onDone }: { onDone: () => void }) {
   const depts = useStore((s) => s.departments)
@@ -69,9 +61,10 @@ export default function Studio({ onDone }: { onDone: () => void }) {
 
   // หน้าปก & ผู้ลงนาม
   const [ownerLine, setOwnerLine] = useState('')
-  const [orgLine, setOrgLine] = useState('โรงพยาบาลปาย')
+  const [orgLine, setOrgLine] = useState('') // ตราจริงมีชื่อโรงพยาบาลอยู่แล้ว — เว้นว่างได้
   const [logoFile, setLogoFile] = useState<File | null>(null)
-  const [logoCm, setLogoCm] = useState(7.0)
+  const [logoCm, setLogoCm] = useState(8.2) // เอกสารจริงใช้ ~8.17 ซม.
+  const [preparedNo, setPreparedNo] = useState(1)
   const [signatories, setSignatories] = useState<SopSignatory[]>([
     { role: 'ผู้จัดทำ', name: me?.name ?? '', position: me?.position ?? '' },
     { role: 'ผู้ทบทวน', name: '', position: '' },
@@ -83,6 +76,7 @@ export default function Studio({ onDone }: { onDone: () => void }) {
     () => docCode({ level, deptCode, seq: nextSeq(level, deptCode), revision: 1 }),
     [level, deptCode],
   )
+  const logoPreview = useMemo(() => (logoFile ? URL.createObjectURL(logoFile) : paiLogoUrl), [logoFile])
 
   const setBody = (k: string, v: string) => setBodies((b) => ({ ...b, [k]: v }))
 
@@ -102,12 +96,13 @@ export default function Studio({ onDone }: { onDone: () => void }) {
   }, `sec-${s.key}`)
 
   const aiFlow = () => runAi(async () => {
-    const steps = await aiSuggestFlow(title || 'กระบวนการปฏิบัติงาน')
-    setNodes([
-      { id: uid(), kind: 'start', text: 'เริ่มต้น' },
-      ...steps.map((t) => ({ id: uid(), kind: 'process' as NodeKind, text: t })),
-      { id: uid(), kind: 'end', text: 'สิ้นสุด' },
-    ])
+    const steps = await aiSuggestFlow(title || 'กระบวนการปฏิบัติงาน', bodies.procedure)
+    const ids = steps.map(() => uid())
+    setNodes(steps.map((s, i) => ({
+      id: ids[i], kind: s.kind as NodeKind, text: s.text,
+      loopTo: s.loopToIndex != null && s.loopToIndex < steps.length && s.loopToIndex !== i
+        ? ids[s.loopToIndex] : undefined,
+    })))
   }, 'flow')
 
   const buildDoc = async (): Promise<void> => {
@@ -125,24 +120,27 @@ export default function Studio({ onDone }: { onDone: () => void }) {
         flowPng = { data, width, height }
       }
 
-      // ตราโรงพยาบาล: ใช้ไฟล์ที่แนบ หรือสร้างตราตัวอย่าง
-      let logo: { data: Uint8Array; type: 'png' | 'jpg' }
+      // ตราโรงพยาบาล: ใช้ไฟล์ที่แนบ หรือตราโรงพยาบาลปายจริงที่ฝังมากับระบบ
+      let logo: DocxImage
+      let headerLogo: DocxImage
       if (logoFile) {
         const buf = new Uint8Array(await logoFile.arrayBuffer())
         logo = { data: buf, type: logoFile.type.includes('jpeg') || logoFile.type.includes('jpg') ? 'jpg' : 'png' }
+        headerLogo = logo
       } else {
-        const seal = sealSvg(owner, orgLine.trim() || 'โรงพยาบาล')
-        logo = { data: await svgToPng(seal.svg, seal.width, seal.height, 2), type: 'png' }
+        logo = { data: await fetchAsset(paiLogoUrl), type: 'png' }
+        headerLogo = { data: await fetchAsset(paiLogoSmUrl), type: 'png' }
       }
 
       const blob = await buildSopDocx({
-        levelTitleTh: meta.th, levelTitleEn: meta.en, code,
+        levelTitleTh: meta.th, levelTitleEn: meta.en,
+        headerLevelLine: headerLevelLine(meta), code,
         title: title || '(ยังไม่ระบุชื่อเรื่อง)',
-        ownerLine: owner, orgLine: orgLine.trim() || 'โรงพยาบาลปาย',
-        revision: 1,
+        ownerLine: owner, orgLine: orgLine.trim() || undefined,
+        revision: 1, preparedNo,
         effectiveDate: new Date().toLocaleDateString('th-TH', { day: '2-digit', month: 'long', year: 'numeric' }),
         signatories: signatories.filter((s) => s.role.trim() || s.name.trim()),
-        logo, logoCm,
+        logo, logoCm, headerLogo,
         sections, flowPng,
       })
       downloadBlob(blob, `${code}_ร่าง.docx`)
@@ -228,16 +226,26 @@ export default function Studio({ onDone }: { onDone: () => void }) {
               <Field label="บรรทัดใต้ตรา (คณะกรรมการ/หน่วยงาน)" className="col-span-2">
                 <input value={ownerLine} onChange={(e) => setOwnerLine(e.target.value)} className={inputCls} placeholder={dept?.nameTh ?? 'เช่น คณะกรรมการเภสัชกรรมบำบัด'} />
               </Field>
-              <Field label="ชื่อองค์กร">
-                <input value={orgLine} onChange={(e) => setOrgLine(e.target.value)} className={inputCls} placeholder="โรงพยาบาลปาย" />
+              <Field label="บรรทัดชื่อองค์กร (เว้นว่างได้ — ตรามีชื่อโรงพยาบาลอยู่แล้ว)">
+                <input value={orgLine} onChange={(e) => setOrgLine(e.target.value)} className={inputCls} placeholder="เช่น โรงพยาบาลปาย" />
               </Field>
-              <Field label={`ขนาดตรา (ซม.) — ${logoCm.toFixed(1)}`}>
-                <input type="range" min={5} max={8} step={0.1} value={logoCm} onChange={(e) => setLogoCm(Number(e.target.value))} className="w-full accent-brand-600" />
+              <Field label="จัดทำครั้งที่ (แสดงในหัวกระดาษ)">
+                <input type="number" min={1} value={preparedNo} onChange={(e) => setPreparedNo(Math.max(1, Number(e.target.value) || 1))} className={inputCls} />
               </Field>
-              <Field label="แนบตราโรงพยาบาล (PNG/JPG) — เว้นว่างใช้ตราตัวอย่าง" className="col-span-2">
-                <input type="file" accept="image/png,image/jpeg" onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-brand-50 file:px-3 file:py-1 file:text-brand-700" />
-                {logoFile && <div className="mt-1 text-[11px] text-emerald-600">แนบแล้ว: {logoFile.name}</div>}
+              <Field label={`ขนาดตราหน้าปก (ซม.) — ${logoCm.toFixed(1)}`}>
+                <input type="range" min={5} max={9} step={0.1} value={logoCm} onChange={(e) => setLogoCm(Number(e.target.value))} className="w-full accent-brand-600" />
+              </Field>
+              <Field label="ตราเอกสาร" className="col-span-2">
+                <div className="flex items-center gap-3">
+                  <img src={logoPreview} alt="ตราโรงพยาบาล" className="h-16 w-16 shrink-0 rounded-lg border border-slate-100 object-contain p-1" />
+                  <div className="min-w-0 flex-1">
+                    <input type="file" accept="image/png,image/jpeg" onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-brand-50 file:px-3 file:py-1 file:text-brand-700" />
+                    <div className="mt-1 text-[11px] text-slate-400">
+                      {logoFile ? <span className="text-emerald-600">ใช้ตราที่แนบ: {logoFile.name}</span> : 'ใช้ตราโรงพยาบาลปายจริงให้อัตโนมัติ (ทั้งหน้าปกและหัวกระดาษ) — แนบไฟล์หากต้องการตราอื่น'}
+                    </div>
+                  </div>
+                </div>
               </Field>
             </div>
 
@@ -314,30 +322,47 @@ export default function Studio({ onDone }: { onDone: () => void }) {
           >
             <div className="space-y-2">
               {nodes.map((n, i) => (
-                <div key={n.id} className="flex items-center gap-1.5">
-                  <select
-                    value={n.kind}
-                    onChange={(e) => setNodes((ns) => ns.map((x) => x.id === n.id ? { ...x, kind: e.target.value as NodeKind } : x))}
-                    className="rounded-lg border border-slate-200 px-1.5 py-1.5 text-xs outline-none focus:border-brand-400"
-                  >
-                    {(['start', 'process', 'decision', 'end'] as NodeKind[]).map((k) => <option key={k} value={k}>{kindLabel[k]}</option>)}
-                  </select>
-                  <input
-                    value={n.text}
-                    onChange={(e) => setNodes((ns) => ns.map((x) => x.id === n.id ? { ...x, text: e.target.value } : x))}
-                    className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-brand-400"
-                    placeholder={`ขั้นที่ ${i + 1}`}
-                  />
-                  <button onClick={() => setNodes((ns) => ns.filter((x) => x.id !== n.id))} className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-rose-600">
-                    <Trash2 size={14} />
-                  </button>
+                <div key={n.id}>
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={n.kind}
+                      onChange={(e) => setNodes((ns) => ns.map((x) => x.id === n.id ? { ...x, kind: e.target.value as NodeKind, loopTo: e.target.value === 'decision' ? x.loopTo : undefined } : x))}
+                      className="rounded-lg border border-slate-200 px-1.5 py-1.5 text-xs outline-none focus:border-brand-400"
+                    >
+                      {(['start', 'process', 'decision', 'end'] as NodeKind[]).map((k) => <option key={k} value={k}>{kindLabel[k]}</option>)}
+                    </select>
+                    <input
+                      value={n.text}
+                      onChange={(e) => setNodes((ns) => ns.map((x) => x.id === n.id ? { ...x, text: e.target.value } : x))}
+                      className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-brand-400"
+                      placeholder={`ขั้นที่ ${i + 1}`}
+                    />
+                    <button onClick={() => setNodes((ns) => ns.filter((x) => x.id !== n.id))} className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-rose-600">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                  {n.kind === 'decision' && (
+                    <div className="mt-1 flex items-center gap-1.5 pl-2 text-[11px] text-slate-500">
+                      <CornerUpLeft size={12} className="shrink-0 text-amber-500" /> เมื่อไม่ผ่าน วนกลับไป
+                      <select
+                        value={n.loopTo ?? ''}
+                        onChange={(e) => setNodes((ns) => ns.map((x) => x.id === n.id ? { ...x, loopTo: e.target.value || undefined } : x))}
+                        className="min-w-0 flex-1 rounded-md border border-slate-200 px-1.5 py-1 text-[11px] outline-none focus:border-brand-400"
+                      >
+                        <option value="">— ไม่มีเส้นวนกลับ —</option>
+                        {nodes.map((x, j) => x.id !== n.id && (
+                          <option key={x.id} value={x.id}>ขั้นที่ {j + 1} — {(x.text || kindLabel[x.kind]).slice(0, 30)}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
               ))}
               <button onClick={() => setNodes((ns) => [...ns, { id: uid(), kind: 'process', text: '' }])} className="inline-flex items-center gap-1 rounded-lg border border-dashed border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-500 hover:border-brand-300 hover:text-brand-600">
                 <Plus size={13} /> เพิ่มขั้นตอน
               </button>
             </div>
-            <div className="mt-4 overflow-auto rounded-lg border border-slate-100 bg-white p-2" dangerouslySetInnerHTML={{ __html: flow.svg }} />
+            <div className="mt-4 rounded-lg border border-slate-100 bg-white p-2 [&_svg]:h-auto [&_svg]:max-w-full" dangerouslySetInnerHTML={{ __html: flow.svg }} />
           </Card>
 
           <Card title="สรุป & ดาวน์โหลด">
@@ -354,7 +379,7 @@ export default function Studio({ onDone }: { onDone: () => void }) {
             </button>
             <p className="mt-2 flex items-start gap-1 text-[11px] text-slate-400">
               <FileText size={12} className="mt-0.5 shrink-0" />
-              ไฟล์ Word จัดหน้า A4 · TH Sarabun New 16 · ขอบ 1.91/2.54 ซม. ตามภาคผนวก 7.5
+              ไฟล์ Word ตามแม่แบบเอกสารจริง: หน้าปก + ตราโรงพยาบาลปาย · หัวกระดาษทุกหน้าพร้อมเลขหน้าอัตโนมัติ · บันทึกการแก้ไข · ภาคผนวก Flow chart
             </p>
           </Card>
         </div>
