@@ -14,9 +14,8 @@ https://zank001.github.io/my-web-app/drugai/
 🗓️ **จัดตารางเวร & ค่าตอบแทน** — แอปจัดเวรรายเดือน + ออกใบเบิกค่าตอบแทน Excel เว็บแยกใน repo เดียวกัน ไม่ต้องเข้าสู่ระบบ:
 https://zank001.github.io/my-web-app/schedule/
 
-📐 **เอกสารออกแบบระบบจัดการร้านยาครบวงจร** — สถาปัตยกรรม, database schema, API spec,
-DDI/CDS engine, GPP/รายงาน ขย. และ roadmap (Phase 0 จะเป็นเว็บ `/pharmacy/` ใน repo นี้):
-[docs/pharmacy-system/](./docs/pharmacy-system/README.md)
+💊 **ระบบจัดการร้านยาครบวงจร** — แยกเป็นโปรเจกต์อิสระแล้ว (เอกสารออกแบบ + ตัวระบบ):
+https://github.com/zank001/pharmacy-system
 
 ## กติกาหลักจาก QM-QMR-001-1 ที่ระบบบังคับใช้
 
