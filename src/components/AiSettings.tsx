@@ -49,19 +49,31 @@ export default function AiSettings({ onSaved }: { onSaved?: () => void }) {
           />
         </div>
         <div className="md:col-span-2">
-          <label className="mb-1 block text-xs font-semibold text-slate-600">API key ของ {providerLabel[prov]}</label>
-          <div className="flex flex-wrap items-end gap-3">
-            <input
-              value={draft.key} onChange={(e) => setDraft({ key: e.target.value })} type="password"
-              placeholder={providerKeyHint[prov]}
-              className="min-w-56 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
-            />
-            <button type="submit" className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">บันทึก</button>
-          </div>
+          {prov === 'free' ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="min-w-56 flex-1 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                ใช้ได้ทันที ไม่ต้องสมัครหรือใส่ key — เป็นบริการสาธารณะ (Pollinations.ai)
+                เหมาะกับงานทั่วไป ช่วงหนาแน่นอาจตอบช้า ถ้าต้องการคุณภาพ/ความเสถียรสูงกว่า แนะนำใส่ key ของเจ้าอื่น
+              </p>
+              <button type="submit" className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">บันทึก</button>
+            </div>
+          ) : (
+            <>
+              <label className="mb-1 block text-xs font-semibold text-slate-600">API key ของ {providerLabel[prov]}</label>
+              <div className="flex flex-wrap items-end gap-3">
+                <input
+                  value={draft.key} onChange={(e) => setDraft({ key: e.target.value })} type="password"
+                  placeholder={providerKeyHint[prov]}
+                  className="min-w-56 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                />
+                <button type="submit" className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">บันทึก</button>
+              </div>
+            </>
+          )}
         </div>
       </form>
       <p className="mt-2 text-[11px] text-slate-400">
-        เลือกเจ้า AI แล้วใส่ key ของเจ้านั้น · key เก็บแยกกันในเบราว์เซอร์ของคุณเท่านั้น (localStorage) · โมเดลเว้นว่างได้ (ใช้ค่าเริ่มต้น) · เว็บสาธิตจึงเรียก AI ฝั่งผู้ใช้
+        แบบฟรีใช้ได้ทันทีไม่ต้องมี key · เจ้าอื่นใส่ key ของเจ้านั้น (เก็บในเบราว์เซอร์ของคุณเท่านั้น — localStorage) · โมเดลเว้นว่างได้ (ใช้ค่าเริ่มต้น)
       </p>
     </Card>
   )
