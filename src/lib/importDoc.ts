@@ -29,8 +29,16 @@ function tableToLines(tbl: Element): string[] {
       .filter((c) => c.localName === 'tc')
       .map((tc) =>
         Array.from(tc.getElementsByTagNameNS(WORD_NS, 'p'))
-          .map((p) => textsOf(p).trim()).filter(Boolean).join(' ')
-          .replace(/\|/g, '/').replace(/\s+/g, ' '),
+          .map((p) => {
+            const t = textsOf(p).trim()
+            if (!t) return ''
+            // ข้อย่อยแบบ bullet ในเซลล์ (เช่นรายการ ○ Yes / ○ No) — กู้เครื่องหมายกลับมา
+            const bullet = p.getElementsByTagNameNS(WORD_NS, 'numPr').length > 0
+            return (bullet ? '○ ' : '') + t
+          })
+          .filter(Boolean)
+          .join(' ¶ ') // ¶ = ขึ้นบรรทัดใหม่ภายในเซลล์ (แปลงกลับเป็นหลายบรรทัดตอนสร้างไฟล์ Word)
+          .replace(/\|/g, '/').replace(/[ \t\r\n]+/g, ' '),
       )
     if (rows.length === 0) {
       const head = cells.join(' ')
