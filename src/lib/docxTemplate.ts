@@ -1,7 +1,7 @@
 import {
-  AlignmentType, BorderStyle, Document, Header, ImageRun, NumberFormat, PageBreak,
-  Packer, PageNumber, Paragraph, Table, TableCell, TableRow, TextRun, VerticalAlign,
-  WidthType,
+  AlignmentType, BorderStyle, Document, Header, ImageRun, LineRuleType, NumberFormat,
+  PageBreak, Packer, PageNumber, Paragraph, Table, TableCell, TableRow, TextRun,
+  VerticalAlign, WidthType,
 } from 'docx'
 
 /**
@@ -49,10 +49,18 @@ export interface SopDocData {
 const run = (text: string, o: { size?: number; bold?: boolean } = {}) =>
   new TextRun({ text, font: FONT, size: PT(o.size ?? 16), bold: o.bold })
 
+/**
+ * ระยะบรรทัดแบบสัดส่วน (240 = 1 บรรทัด) — ต้องระบุ lineRule ให้ชัดเสมอ:
+ * ถ้าปล่อยว่าง Word ตีความเป็น auto แต่ WPS ตีความค่า line เป็นความสูงตายตัว
+ * (หน่วย twips ≈ 15pt) ทำให้บรรทัดถูกบีบซ้อนกันจนอ่านไม่ออก
+ */
+const lineSp = (line: number, o: { before?: number; after?: number } = {}) =>
+  ({ before: o.before, after: o.after, line, lineRule: LineRuleType.AUTO })
+
 const centered = (text: string, o: { size?: number; bold?: boolean; before?: number; after?: number } = {}) =>
   new Paragraph({
     alignment: AlignmentType.CENTER,
-    spacing: { before: o.before ?? 0, after: o.after ?? 60, line: 300 },
+    spacing: lineSp(300, { before: o.before ?? 0, after: o.after ?? 60 }),
     children: text ? [run(text, o)] : [],
   })
 
@@ -79,7 +87,7 @@ function tcell(children: Paragraph[], opts: { span?: number; rowSpan?: number; w
 }
 
 const line = (text: string, bold = false, size = 16) =>
-  new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 0, after: 0, line: 264 }, children: [run(text, { bold, size })] })
+  new Paragraph({ alignment: AlignmentType.CENTER, spacing: lineSp(264, { before: 0, after: 0 }), children: [run(text, { bold, size })] })
 
 /** ตารางลงนามหน้าปก — หัวตาราง merge คอลัมน์ 1-2, แถวลงนาม merge คอลัมน์ 2-3 */
 function signatureTable(d: SopDocData): Table {
@@ -125,7 +133,7 @@ function coverChildren(d: SopDocData): (Paragraph | Table)[] {
     const side = px(d.logoCm ?? 8.17)
     cover.push(new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { before: 200, after: 160, line: 240 },
+      spacing: lineSp(240, { before: 200, after: 160 }),
       children: [new ImageRun({ data: d.logo.data, type: d.logo.type, transformation: { width: side, height: side } })],
     }))
   }
@@ -158,7 +166,7 @@ function pageHeader(d: SopDocData): Header {
 
   const pageNo = new Paragraph({
     alignment: AlignmentType.CENTER,
-    spacing: { before: 0, after: 0, line: 264 },
+    spacing: lineSp(264, { before: 0, after: 0 }),
     children: [new TextRun({ font: FONT, size: PT(16), children: ['หน้า ', PageNumber.CURRENT, '/', PageNumber.TOTAL_PAGES_IN_SECTION] })],
   })
 
@@ -220,20 +228,20 @@ function contentChildren(d: SopDocData): (Paragraph | Table)[] {
   body.push(revisionTable(d))
   body.push(new Paragraph({ children: [new PageBreak()] }))
 
-  // หัวข้อ 1-7 — หัวข้อ 16pt หนา เนื้อความ 16pt จัดชิดขอบแบบไทย
+  // หัวข้อ 1-7 — หัวข้อ 16pt หนา เนื้อความ 16pt จัดชิดขอบสองข้าง
   d.sections.forEach((s, i) => {
     body.push(new Paragraph({
-      spacing: { before: i === 0 ? 0 : 120, after: 60, line: 300 },
+      spacing: lineSp(300, { before: i === 0 ? 0 : 120, after: 60 }),
       children: [run(`${i + 1}. ${s.label}`, { bold: true })],
     }))
     const lines = s.body.split('\n').map((l) => l.trim()).filter(Boolean)
     if (lines.length === 0) {
-      body.push(new Paragraph({ spacing: { after: 60, line: 300 }, children: [run('(ยังไม่ได้ระบุ)')] }))
+      body.push(new Paragraph({ spacing: lineSp(300, { after: 60 }), children: [run('(ยังไม่ได้ระบุ)')] }))
     } else {
       lines.forEach((l) => body.push(new Paragraph({
         alignment: AlignmentType.JUSTIFIED,
         indent: { firstLine: cm(1.0) },
-        spacing: { after: 40, line: 300 },
+        spacing: lineSp(300, { after: 40 }),
         children: [run(l)],
       })))
     }
