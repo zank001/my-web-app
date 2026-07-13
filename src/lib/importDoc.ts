@@ -13,7 +13,35 @@ import type { DocLevel } from '../types'
 
 const WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 
-/** ดึงข้อความล้วนจากไฟล์ .docx (อ่าน word/document.xml โดยตรง ไม่พึ่ง library หนัก) */
+const textsOf = (el: Element) =>
+  Array.from(el.getElementsByTagNameNS(WORD_NS, 't')).map((t) => t.textContent ?? '').join('')
+
+/**
+ * แปลงตารางเป็นบรรทัดรูปแบบ | เซลล์1 | เซลล์2 | (แถวละบรรทัด) เพื่อให้ตาราง
+ * เนื้อหารอดผ่านขั้นจัดหมวด แล้วตัวสร้างไฟล์ Word แปลงกลับเป็นตารางจริง
+ * ตารางแม่แบบ (ลงนาม/หัวกระดาษ/บันทึกการแก้ไข) ข้ามไป — ระบบสร้างใหม่ให้อยู่แล้ว
+ */
+function tableToLines(tbl: Element): string[] {
+  if (textsOf(tbl).includes('รหัสเอกสาร')) return [] // ตารางลงนามหน้าปก/หัวกระดาษ
+  const rows: string[] = []
+  for (const tr of Array.from(tbl.children).filter((c) => c.localName === 'tr')) {
+    const cells = Array.from(tr.children)
+      .filter((c) => c.localName === 'tc')
+      .map((tc) =>
+        Array.from(tc.getElementsByTagNameNS(WORD_NS, 'p'))
+          .map((p) => textsOf(p).trim()).filter(Boolean).join(' ')
+          .replace(/\|/g, '/').replace(/\s+/g, ' '),
+      )
+    if (rows.length === 0) {
+      const head = cells.join(' ')
+      if (head.includes('บันทึกการแก้ไข') && head.includes('วันที่')) return [] // ตารางบันทึกการแก้ไข
+    }
+    rows.push(`| ${cells.join(' | ')} |`)
+  }
+  return rows
+}
+
+/** ดึงเนื้อหาจากไฟล์ .docx ตามลำดับจริง — ย่อหน้าเป็นบรรทัด ตารางเป็นบรรทัด | คั่นเซลล์ | */
 export function extractDocxText(buf: ArrayBuffer): string {
   let files: Record<string, Uint8Array>
   try {
@@ -24,10 +52,14 @@ export function extractDocxText(buf: ArrayBuffer): string {
   const xml = files['word/document.xml']
   if (!xml) throw new Error('ไม่พบเนื้อหาในไฟล์ (.docx ต้องมี word/document.xml)')
   const dom = new DOMParser().parseFromString(strFromU8(xml), 'application/xml')
-  const paras = Array.from(dom.getElementsByTagNameNS(WORD_NS, 'p'))
-  const lines = paras.map((p) =>
-    Array.from(p.getElementsByTagNameNS(WORD_NS, 't')).map((t) => t.textContent ?? '').join('').trim(),
-  )
+  const body = dom.getElementsByTagNameNS(WORD_NS, 'body')[0]
+  if (!body) throw new Error('ไม่พบเนื้อหาในไฟล์ (.docx ต้องมี word/document.xml)')
+
+  const lines: string[] = []
+  for (const node of Array.from(body.children)) {
+    if (node.localName === 'p') lines.push(textsOf(node).trim())
+    else if (node.localName === 'tbl') lines.push(...tableToLines(node))
+  }
   return lines.filter((l, i) => l || (lines[i - 1] ?? '')).join('\n')
 }
 
@@ -112,6 +144,7 @@ export async function aiRestructure(text: string): Promise<ImportedDoc> {
 กติกา:
 - แยกเนื้อหาเดิมเข้าหัวข้อ: objective=วัตถุประสงค์, scope=ขอบเขต, responsibility=หน้าที่และความรับผิดชอบ, definition=คำจำกัดความ, procedure=รายละเอียด/ขั้นตอนการปฏิบัติ, reference=เอกสารอ้างอิง, appendix=ภาคผนวก
 - คงถ้อยคำเดิมให้มากที่สุด ปรับเป็นภาษาราชการที่สะอาดขึ้นได้เล็กน้อย รายการให้ขึ้นบรรทัดใหม่ทีละข้อ
+- บรรทัดที่ขึ้นต้นและลงท้ายด้วย | คือแถวของตาราง ให้คงไว้ตามเดิมทุกแถวเรียงติดกัน (ห้ามแก้ ห้ามรวม ห้ามตัดเครื่องหมาย | ออก) วางในหัวข้อที่เหมาะสม
 - หัวข้อที่ไม่มีเนื้อหาในต้นฉบับ ให้ใส่ค่าว่าง ""
 - ไม่ต้องเอาส่วนหัวกระดาษ เลขหน้า รหัสเอกสาร ตารางลงนาม มาใส่ในเนื้อหา
 
