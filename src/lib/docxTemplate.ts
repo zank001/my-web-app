@@ -220,6 +220,42 @@ function revisionTable(d: SopDocData, blankRows = 14): Table {
   })
 }
 
+/** บรรทัดรูปแบบ | เซลล์1 | เซลล์2 | (จากการนำเข้าเอกสาร) → ตารางจริง */
+const isPipeRow = (l: string) => l.startsWith('|') && l.endsWith('|') && l.length > 2
+
+function textTable(rowsRaw: string[]): Table {
+  const rows = rowsRaw.map((l) => l.slice(1, -1).split('|').map((c) => c.trim()))
+  const nCols = Math.max(...rows.map((r) => r.length))
+  rows.forEach((r) => { while (r.length < nCols) r.push('') })
+
+  // แบ่งความกว้างคอลัมน์ตามความยาวเนื้อหาที่ยาวที่สุดของแต่ละคอลัมน์
+  const weights = Array.from({ length: nCols }, (_, ci) => {
+    const maxLen = Math.max(...rows.map((r) => r[ci].length))
+    return Math.max(5, Math.min(40, maxLen))
+  })
+  const wSum = weights.reduce((a, b) => a + b, 0)
+  const widths = weights.map((w) => Math.round(TABLE_W * (w / wSum)))
+
+  return new Table({
+    width: { size: TABLE_W, type: WidthType.DXA },
+    columnWidths: widths,
+    rows: rows.map((r, ri) => new TableRow({
+      tableHeader: ri === 0,
+      children: r.map((c, ci) => new TableCell({
+        borders: cellBorders,
+        width: { size: widths[ci], type: WidthType.DXA },
+        verticalAlign: VerticalAlign.CENTER,
+        margins: { top: 30, bottom: 30, left: 60, right: 60 },
+        children: [new Paragraph({
+          alignment: ri === 0 ? AlignmentType.CENTER : undefined,
+          spacing: lineSp(264, { before: 0, after: 0 }),
+          children: [run(c, { bold: ri === 0 })],
+        })],
+      })),
+    })),
+  })
+}
+
 function contentChildren(d: SopDocData): (Paragraph | Table)[] {
   const body: (Paragraph | Table)[] = []
 
@@ -229,6 +265,7 @@ function contentChildren(d: SopDocData): (Paragraph | Table)[] {
   body.push(new Paragraph({ children: [new PageBreak()] }))
 
   // หัวข้อ 1-7 — หัวข้อ 16pt หนา เนื้อความ 16pt จัดชิดขอบสองข้าง
+  // บรรทัด | คั่นเซลล์ | ที่เรียงติดกันจะถูกประกอบกลับเป็นตารางจริง
   d.sections.forEach((s, i) => {
     body.push(new Paragraph({
       spacing: lineSp(300, { before: i === 0 ? 0 : 120, after: 60 }),
@@ -237,13 +274,25 @@ function contentChildren(d: SopDocData): (Paragraph | Table)[] {
     const lines = s.body.split('\n').map((l) => l.trim()).filter(Boolean)
     if (lines.length === 0) {
       body.push(new Paragraph({ spacing: lineSp(300, { after: 60 }), children: [run('(ยังไม่ได้ระบุ)')] }))
-    } else {
-      lines.forEach((l) => body.push(new Paragraph({
-        alignment: AlignmentType.JUSTIFIED,
-        indent: { firstLine: cm(1.0) },
-        spacing: lineSp(300, { after: 40 }),
-        children: [run(l)],
-      })))
+      return
+    }
+    let li = 0
+    while (li < lines.length) {
+      if (isPipeRow(lines[li])) {
+        const grp: string[] = []
+        while (li < lines.length && isPipeRow(lines[li])) { grp.push(lines[li]); li++ }
+        body.push(textTable(grp))
+        // เว้นย่อหน้าเปล่าหลังตาราง กันตารางถัดไป/ข้อความชนกัน
+        body.push(new Paragraph({ spacing: lineSp(240, { before: 0, after: 40 }), children: [] }))
+      } else {
+        body.push(new Paragraph({
+          alignment: AlignmentType.JUSTIFIED,
+          indent: { firstLine: cm(1.0) },
+          spacing: lineSp(300, { after: 40 }),
+          children: [run(lines[li])],
+        }))
+        li++
+      }
     }
   })
 

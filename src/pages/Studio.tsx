@@ -268,6 +268,7 @@ export default function Studio({ onDone }: { onDone: () => void }) {
             <p className="mb-3 text-[11px] text-slate-400">
               แนบไฟล์เอกสารที่พิมพ์เองไว้ (.docx / .txt) หรือวางเนื้อหา แล้วระบบจะแยกเข้าหัวข้อมาตรฐาน 1-7
               ตรวจจับรหัส/ระดับเอกสารให้ และจัดหน้า Word ใหม่ทั้งเล่มตามแม่แบบจริง (ปก · หัวกระดาษ · ฟอนต์ · ตารางลงนาม)
+              — ตารางในเนื้อหาจะแสดงเป็นบรรทัด <span className="font-mono">| คั่นเซลล์ |</span> และกลับเป็นตารางจริงในไฟล์ Word
             </p>
             <div className="grid gap-3">
               <input
