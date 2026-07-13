@@ -224,33 +224,41 @@ function revisionTable(d: SopDocData, blankRows = 14): Table {
 const isPipeRow = (l: string) => l.startsWith('|') && l.endsWith('|') && l.length > 2
 
 function textTable(rowsRaw: string[]): Table {
-  const rows = rowsRaw.map((l) => l.slice(1, -1).split('|').map((c) => c.trim()))
+  // เซลล์อาจมีหลายบรรทัด คั่นด้วย ¶ (ได้จากการนำเข้าเซลล์ที่มีหลายย่อหน้า/รายการย่อย)
+  const rows = rowsRaw.map((l) =>
+    l.slice(1, -1).split('|').map((c) => c.split('¶').map((s) => s.trim()).filter(Boolean)))
   const nCols = Math.max(...rows.map((r) => r.length))
-  rows.forEach((r) => { while (r.length < nCols) r.push('') })
+  rows.forEach((r) => { while (r.length < nCols) r.push([]) })
 
-  // แบ่งความกว้างคอลัมน์ตามความยาวเนื้อหาที่ยาวที่สุดของแต่ละคอลัมน์
+  // แบ่งความกว้างคอลัมน์ตามบรรทัดที่ยาวที่สุดของแต่ละคอลัมน์
+  // ขั้นต่ำ 8 เพื่อให้ช่องสั้นอย่าง "○ Yes" ไม่ตกบรรทัด
   const weights = Array.from({ length: nCols }, (_, ci) => {
-    const maxLen = Math.max(...rows.map((r) => r[ci].length))
-    return Math.max(5, Math.min(40, maxLen))
+    const maxLen = Math.max(0, ...rows.flatMap((r) => r[ci].map((s) => s.length)))
+    return Math.max(8, Math.min(40, maxLen))
   })
   const wSum = weights.reduce((a, b) => a + b, 0)
   const widths = weights.map((w) => Math.round(TABLE_W * (w / wSum)))
+
+  const cellParas = (segs: string[], header: boolean) => {
+    if (!segs.length) segs = ['']
+    return segs.map((s) => new Paragraph({
+      alignment: header ? AlignmentType.CENTER : undefined,
+      spacing: lineSp(264, { before: 0, after: 0 }),
+      children: [run(s, { bold: header })],
+    }))
+  }
 
   return new Table({
     width: { size: TABLE_W, type: WidthType.DXA },
     columnWidths: widths,
     rows: rows.map((r, ri) => new TableRow({
       tableHeader: ri === 0,
-      children: r.map((c, ci) => new TableCell({
+      children: r.map((segs, ci) => new TableCell({
         borders: cellBorders,
         width: { size: widths[ci], type: WidthType.DXA },
         verticalAlign: VerticalAlign.CENTER,
         margins: { top: 30, bottom: 30, left: 60, right: 60 },
-        children: [new Paragraph({
-          alignment: ri === 0 ? AlignmentType.CENTER : undefined,
-          spacing: lineSp(264, { before: 0, after: 0 }),
-          children: [run(c, { bold: ri === 0 })],
-        })],
+        children: cellParas(segs, ri === 0),
       })),
     })),
   })
