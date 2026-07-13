@@ -1,8 +1,8 @@
 import {
-  CheckCircle2, CornerUpLeft, Download, FileText, FileUp, KeyRound, Loader2, Plus,
-  Send, Sparkles, Trash2, Wand2, X,
+  CheckCircle2, CornerUpLeft, Download, Eye, FileText, FileUp, KeyRound, Loader2,
+  Plus, Send, Sparkles, Trash2, Wand2, X,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import AiSettings from '../components/AiSettings'
 import Card from '../components/Card'
 import paiLogoUrl from '../assets/pai-logo.png'
@@ -137,48 +137,79 @@ export default function Studio({ onDone }: { onDone: () => void }) {
     })))
   }, 'flow')
 
+  /** ประกอบข้อมูลทั้งหมดแล้วสร้างไฟล์ Word เป็น Blob (ใช้ร่วมกันทั้งดาวน์โหลดและพรีวิว) */
+  const buildBlob = async (): Promise<Blob> => {
+    const meta = LEVEL_META[level]
+    const owner = ownerLine.trim() || dept?.nameTh || deptCode
+    const sections: SopSectionContent[] = SECTIONS.map((s) => ({ label: s.label, body: bodies[s.key] ?? '' }))
+
+    // แผนผัง flowchart → รูปในภาคผนวก
+    let flowPng
+    if (nodes.filter((n) => n.text.trim()).length >= 2) {
+      const { svg, width, height } = renderFlowSvg(nodes)
+      const data = await svgToPng(svg, width, height)
+      flowPng = { data, width, height }
+    }
+
+    // ตราโรงพยาบาล: ใช้ไฟล์ที่แนบ หรือตราโรงพยาบาลปายจริงที่ฝังมากับระบบ
+    let logo: DocxImage
+    let headerLogo: DocxImage
+    if (logoFile) {
+      const buf = new Uint8Array(await logoFile.arrayBuffer())
+      logo = { data: buf, type: logoFile.type.includes('jpeg') || logoFile.type.includes('jpg') ? 'jpg' : 'png' }
+      headerLogo = logo
+    } else {
+      logo = { data: await fetchAsset(paiLogoUrl), type: 'png' }
+      headerLogo = { data: await fetchAsset(paiLogoSmUrl), type: 'png' }
+    }
+
+    return buildSopDocx({
+      levelTitleTh: meta.th, levelTitleEn: meta.en,
+      headerLevelLine: headerLevelLine(meta), code,
+      title: title || '(ยังไม่ระบุชื่อเรื่อง)',
+      ownerLine: owner, orgLine: orgLine.trim() || undefined,
+      revision, preparedNo,
+      effectiveDate: new Date().toLocaleDateString('th-TH', { day: '2-digit', month: 'long', year: 'numeric' }),
+      signatories: signatories.filter((s) => s.role.trim() || s.name.trim()),
+      logo, logoCm, headerLogo,
+      sections, flowPng,
+    })
+  }
+
   const buildDoc = async (): Promise<void> => {
     setErr(''); setBusy('docx')
     try {
-      const meta = LEVEL_META[level]
-      const owner = ownerLine.trim() || dept?.nameTh || deptCode
-      const sections: SopSectionContent[] = SECTIONS.map((s) => ({ label: s.label, body: bodies[s.key] ?? '' }))
-
-      // แผนผัง flowchart → รูปในภาคผนวก
-      let flowPng
-      if (nodes.filter((n) => n.text.trim()).length >= 2) {
-        const { svg, width, height } = renderFlowSvg(nodes)
-        const data = await svgToPng(svg, width, height)
-        flowPng = { data, width, height }
-      }
-
-      // ตราโรงพยาบาล: ใช้ไฟล์ที่แนบ หรือตราโรงพยาบาลปายจริงที่ฝังมากับระบบ
-      let logo: DocxImage
-      let headerLogo: DocxImage
-      if (logoFile) {
-        const buf = new Uint8Array(await logoFile.arrayBuffer())
-        logo = { data: buf, type: logoFile.type.includes('jpeg') || logoFile.type.includes('jpg') ? 'jpg' : 'png' }
-        headerLogo = logo
-      } else {
-        logo = { data: await fetchAsset(paiLogoUrl), type: 'png' }
-        headerLogo = { data: await fetchAsset(paiLogoSmUrl), type: 'png' }
-      }
-
-      const blob = await buildSopDocx({
-        levelTitleTh: meta.th, levelTitleEn: meta.en,
-        headerLevelLine: headerLevelLine(meta), code,
-        title: title || '(ยังไม่ระบุชื่อเรื่อง)',
-        ownerLine: owner, orgLine: orgLine.trim() || undefined,
-        revision, preparedNo,
-        effectiveDate: new Date().toLocaleDateString('th-TH', { day: '2-digit', month: 'long', year: 'numeric' }),
-        signatories: signatories.filter((s) => s.role.trim() || s.name.trim()),
-        logo, logoCm, headerLogo,
-        sections, flowPng,
-      })
-      downloadBlob(blob, `${code}_ร่าง.docx`)
+      downloadBlob(await buildBlob(), `${code}_ร่าง.docx`)
     } catch (e) { setErr(e instanceof Error ? e.message : 'สร้างไฟล์ไม่สำเร็จ') }
     finally { setBusy(null) }
   }
+
+  // พรีวิวไฟล์ Word ในเบราว์เซอร์ — เรนเดอร์จากไฟล์ .docx จริงตัวเดียวกับที่ดาวน์โหลด
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const previewRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!previewOpen) return
+    let cancelled = false
+    ;(async () => {
+      setErr(''); setBusy('preview')
+      try {
+        const blob = await buildBlob()
+        const { renderAsync } = await import('docx-preview')
+        if (cancelled || !previewRef.current) return
+        previewRef.current.innerHTML = ''
+        await renderAsync(await blob.arrayBuffer(), previewRef.current, undefined, {
+          breakPages: true, renderHeaders: true, renderFooters: true, ignoreLastRenderedPageBreak: true,
+        })
+      } catch (e) {
+        if (!cancelled) setErr(e instanceof Error ? e.message : 'สร้างตัวอย่างไม่สำเร็จ')
+      } finally {
+        if (!cancelled) setBusy(null)
+      }
+    })()
+    return () => { cancelled = true }
+    // ต้องการให้เรนเดอร์เฉพาะตอนเปิดหน้าต่างพรีวิว (ข้อมูลถูกอ่านสดใน buildBlob)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewOpen])
 
   const submit = () => {
     actions.submitRequest({
@@ -257,13 +288,22 @@ export default function Studio({ onDone }: { onDone: () => void }) {
                   จัดรูปแบบตามแม่แบบ
                 </button>
                 {importInfo && (
-                  <button
-                    onClick={buildDoc} disabled={busy === 'docx'}
-                    className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
-                  >
-                    {busy === 'docx' ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
-                    ดาวน์โหลด Word (.docx)
-                  </button>
+                  <>
+                    <button
+                      onClick={() => setPreviewOpen(true)} disabled={busy === 'preview'}
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:text-slate-400"
+                    >
+                      {busy === 'preview' ? <Loader2 size={15} className="animate-spin" /> : <Eye size={15} />}
+                      ดูตัวอย่าง
+                    </button>
+                    <button
+                      onClick={buildDoc} disabled={busy === 'docx'}
+                      className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
+                    >
+                      {busy === 'docx' ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+                      ดาวน์โหลด Word (.docx)
+                    </button>
+                  </>
                 )}
               </div>
               {importInfo && (
@@ -454,7 +494,10 @@ export default function Studio({ onDone }: { onDone: () => void }) {
               <Row label="หัวข้อที่กรอกแล้ว" value={`${filled}/${SECTIONS.length}`} />
               <Row label="ขั้นตอนในผัง" value={`${nodes.filter((n) => n.text.trim()).length}`} />
             </div>
-            <button onClick={buildDoc} disabled={busy === 'docx'} className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400">
+            <button onClick={() => setPreviewOpen(true)} disabled={busy === 'preview'} className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:text-slate-400">
+              {busy === 'preview' ? <Loader2 size={16} className="animate-spin" /> : <Eye size={16} />} ดูตัวอย่างเอกสาร
+            </button>
+            <button onClick={buildDoc} disabled={busy === 'docx'} className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400">
               {busy === 'docx' ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} ดาวน์โหลด Word (.docx)
             </button>
             <button onClick={submit} disabled={!title.trim()} className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-brand-600 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:bg-slate-300">
@@ -467,6 +510,33 @@ export default function Studio({ onDone }: { onDone: () => void }) {
           </Card>
         </div>
       </div>
+
+      {/* หน้าต่างตัวอย่างไฟล์ Word — เรนเดอร์จาก .docx ตัวเดียวกับที่จะดาวน์โหลด */}
+      {previewOpen && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-slate-900/70 p-3 sm:p-6" onClick={() => setPreviewOpen(false)}>
+          <div className="mx-auto flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-slate-200 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-2.5">
+              <span className="flex items-center gap-2 text-sm font-semibold">
+                <Eye size={15} className="text-brand-600" /> ตัวอย่างไฟล์ Word — <span className="font-mono text-brand-700">{code}</span>
+              </span>
+              <div className="flex items-center gap-2">
+                <button onClick={buildDoc} disabled={busy === 'docx'} className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400">
+                  {busy === 'docx' ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} ดาวน์โหลด
+                </button>
+                <button onClick={() => setPreviewOpen(false)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100">
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+            {busy === 'preview' && (
+              <div className="flex items-center justify-center gap-2 bg-white/80 py-8 text-sm text-slate-500">
+                <Loader2 size={16} className="animate-spin" /> กำลังสร้างตัวอย่างเอกสาร…
+              </div>
+            )}
+            <div ref={previewRef} className="min-h-0 flex-1 overflow-auto [&_.docx-wrapper]:bg-transparent [&_.docx-wrapper]:p-4 [&_.docx-wrapper>section]:mb-4 [&_.docx-wrapper>section]:shadow-lg" />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
