@@ -1,22 +1,24 @@
 import {
-  BarChart3, BookOpenCheck, ClipboardCheck, FilePlus2, FileText,
+  BarChart3, BookOpenCheck, ClipboardCheck, Cloud, FilePlus2, FileText,
   Inbox as InboxIcon, LayoutDashboard, LogOut, PenLine, Send, ShieldCheck,
 } from 'lucide-react'
 import { useStore } from '../data/store'
+import { useCloudStatus } from '../lib/cloudConfig'
 import { canSeePage, roleColor, roleLabel } from '../lib/permissions'
 
 export type Page =
   | 'dashboard' | 'register' | 'request' | 'studio' | 'approvals'
-  | 'distribution' | 'inbox' | 'reports' | 'manual'
+  | 'distribution' | 'inbox' | 'reports' | 'manual' | 'cloud'
 
 export default function Sidebar({
   current, onNavigate, onSignOut,
 }: { current: Page; onNavigate: (p: Page) => void; onSignOut: () => void }) {
   const me = useStore((s) => s.users.find((u) => u.id === s.currentUserId))
   const requests = useStore((s) => s.requests)
+  const cloud = useCloudStatus()
   const pendingRequests = requests.filter((r) => r.status === 'submitted' || r.status === 'reviewed').length
 
-  const items: Array<{ key: Page; label: string; icon: typeof FileText; hint?: number }> = [
+  const items: Array<{ key: Page; label: string; icon: typeof FileText; hint?: number; dot?: string }> = [
     { key: 'dashboard',    label: 'แดชบอร์ด',                icon: LayoutDashboard },
     { key: 'register',     label: 'บัญชีเอกสารคุณภาพ',       icon: FileText },
     { key: 'request',      label: 'ขอขึ้นทะเบียน/แก้ไข',     icon: FilePlus2 },
@@ -26,6 +28,10 @@ export default function Sidebar({
     { key: 'inbox',        label: 'กล่องรับเอกสาร',          icon: InboxIcon },
     { key: 'reports',      label: 'รายงาน & ตรวจสอบ',        icon: BarChart3 },
     { key: 'manual',       label: 'คู่มือระบบ (QM-QMR-001)', icon: BookOpenCheck },
+    {
+      key: 'cloud', label: 'บันทึกข้อมูล Cloud', icon: Cloud,
+      dot: cloud.state === 'synced' ? 'bg-emerald-500' : cloud.state === 'error' ? 'bg-rose-500' : cloud.state === 'connecting' ? 'bg-amber-400' : undefined,
+    },
   ]
 
   const visible = me ? items.filter((it) => canSeePage(me.role, it.key)) : items
@@ -43,7 +49,7 @@ export default function Sidebar({
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 scrollbar-thin">
-        {visible.map(({ key, label, icon: Icon, hint }) => {
+        {visible.map(({ key, label, icon: Icon, hint, dot }) => {
           const active = current === key
           return (
             <button
@@ -58,6 +64,7 @@ export default function Sidebar({
             >
               <Icon size={18} className={active ? 'text-brand-600' : 'text-slate-500'} />
               <span className="flex-1 text-left">{label}</span>
+              {dot && <span className={`h-2 w-2 rounded-full ${dot}`} />}
               {hint ? (
                 <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-600">
                   {hint}

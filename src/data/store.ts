@@ -32,6 +32,22 @@ const readSession = (): string | null => {
   }
 }
 
+/* ---------------- บันทึกข้อมูลถาวร (localStorage + ชั้นซิงก์ Cloud) ---------------- */
+
+/** ส่วนของ state ที่เป็นข้อมูลใช้งานจริง (เปลี่ยนแปลงได้) — บันทึกถาวร/ซิงก์ขึ้น Cloud */
+export type SyncKey = 'documents' | 'requests' | 'distributions' | 'activities'
+const SYNC_KEYS: SyncKey[] = ['documents', 'requests', 'distributions', 'activities']
+
+const DATA_KEY = 'qmr_data_v1'
+const readSaved = (): Partial<Pick<State, SyncKey>> => {
+  try {
+    const raw = localStorage.getItem(DATA_KEY)
+    return raw ? (JSON.parse(raw) as Partial<Pick<State, SyncKey>>) : {}
+  } catch {
+    return {}
+  }
+}
+
 let state: State = {
   currentUserId: readSession(),
   users: seedUsers,
@@ -40,6 +56,8 @@ let state: State = {
   requests: seedRequests,
   distributions: seedDistributions,
   activities: seedActivities,
+  // ข้อมูลที่บันทึกไว้ในเครื่องทับข้อมูลตัวอย่าง (ถ้ามี)
+  ...readSaved(),
 }
 
 // OTP ที่ออกให้ระหว่างล็อกอิน (เดโม — เก็บชั่วคราวในหน่วยความจำ ไม่ใช่ใน state)
@@ -56,9 +74,38 @@ const subscribe = (l: () => void) => {
 export const useStore = <T,>(selector: (s: State) => T): T =>
   useSyncExternalStore(subscribe, () => selector(state))
 
+// บันทึกลงเครื่องแบบหน่วงเวลา (กันเขียนถี่เกินไป) และแจ้งชั้นซิงก์ Cloud
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+const persist = () => {
+  if (persistTimer) clearTimeout(persistTimer)
+  persistTimer = setTimeout(() => {
+    try {
+      const data = Object.fromEntries(SYNC_KEYS.map((k) => [k, state[k]]))
+      localStorage.setItem(DATA_KEY, JSON.stringify(data))
+    } catch { /* พื้นที่เต็ม/โหมดส่วนตัว — ข้าม */ }
+  }, 400)
+}
+
+let applyingRemote = false
+let cloudOnChange: (() => void) | null = null
+
 const update = (mut: (s: State) => State) => {
   state = mut(state)
   emit()
+  persist()
+  if (!applyingRemote) cloudOnChange?.()
+}
+
+/** ช่องเชื่อมสำหรับชั้นซิงก์ Cloud (src/lib/cloud.ts) — ไม่ใช้จากหน้า UI โดยตรง */
+export const cloudSync = {
+  keys: SYNC_KEYS,
+  get: (k: SyncKey) => state[k] as unknown[],
+  /** รับข้อมูลจาก Cloud มาแทนที่ (ไม่สะท้อนกลับขึ้น Cloud ซ้ำ) */
+  apply(k: SyncKey, items: unknown[]) {
+    applyingRemote = true
+    try { update((s) => ({ ...s, [k]: items })) } finally { applyingRemote = false }
+  },
+  onChange(fn: (() => void) | null) { cloudOnChange = fn },
 }
 
 const now = () => new Date().toISOString()

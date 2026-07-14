@@ -53,6 +53,7 @@ export const pageRoles: Record<Page, Role[] | 'all'> = {
   inbox: 'all',
   reports: ['qmr', 'chair', 'director'],
   manual: 'all',
+  cloud: ['qmr', 'director'],
 }
 
 export const canSeePage = (role: Role, page: Page) => {
