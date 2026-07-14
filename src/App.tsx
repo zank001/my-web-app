@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Loader2 } from 'lucide-react'
 import Sidebar, { type Page } from './components/Sidebar'
@@ -10,12 +10,15 @@ import Approvals from './pages/Approvals'
 
 // โหลดแยก — สตูดิโอดึง docx + Anthropic SDK ที่ขนาดใหญ่ เข้ามาเฉพาะเมื่อเปิดใช้
 const Studio = lazy(() => import('./pages/Studio'))
+// โหลดแยกเช่นกัน — Firebase SDK โหลดเฉพาะเมื่อผู้ใช้เชื่อมต่อ Cloud
+const CloudSettings = lazy(() => import('./pages/CloudSettings'))
 import Distribution from './pages/Distribution'
 import Inbox from './pages/Inbox'
 import Reports from './pages/Reports'
 import Manual from './pages/Manual'
 import Login from './pages/Login'
 import { actions, useStore } from './data/store'
+import { hasCloudConfig } from './lib/cloudConfig'
 import { canSeePage } from './lib/permissions'
 
 export default function App() {
@@ -23,6 +26,11 @@ export default function App() {
   const [query, setQuery] = useState('')
   const currentUserId = useStore((s) => s.currentUserId)
   const me = useStore((s) => s.users.find((u) => u.id === s.currentUserId))
+
+  // เคยตั้งค่า Cloud ไว้ → เริ่มซิงก์อัตโนมัติเมื่อเปิดเว็บ
+  useEffect(() => {
+    if (hasCloudConfig()) import('./lib/cloud').then((m) => m.startCloud())
+  }, [])
 
   if (!currentUserId || !me) return <Login />
 
@@ -44,6 +52,11 @@ export default function App() {
       case 'inbox':        return <Inbox />
       case 'reports':      return <Reports />
       case 'manual':       return <Manual />
+      case 'cloud':        return (
+        <Suspense fallback={<div className="grid place-items-center py-24 text-slate-400"><Loader2 className="animate-spin" /></div>}>
+          <CloudSettings />
+        </Suspense>
+      )
       default:             return null
     }
   }
