@@ -270,6 +270,24 @@ export const actions = {
     log('ไม่อนุมัติคำขอ', req?.title ?? requestId)
   },
 
+  /** ผู้ดูแลระบบแก้ไขข้อมูลเอกสารในทะเบียนโดยตรง (นอกวงจรคำขอ) */
+  editDocument(id: string, patch: Partial<Pick<QualityDocument,
+    'title' | 'level' | 'deptCode' | 'seq' | 'revision' | 'status' | 'summary'>>) {
+    update((s) => ({
+      ...s,
+      documents: s.documents.map((d) => (d.id === id ? { ...d, ...patch } : d)),
+    }))
+    const doc = state.documents.find((d) => d.id === id)
+    log('แก้ไขข้อมูลเอกสาร', doc ? docCode(doc) + ' ' + doc.title : id)
+  },
+
+  /** ผู้ดูแลระบบลบเอกสารออกจากทะเบียน (ถาวร) */
+  deleteDocument(id: string) {
+    const doc = state.documents.find((d) => d.id === id)
+    update((s) => ({ ...s, documents: s.documents.filter((d) => d.id !== id) }))
+    if (doc) log('ลบเอกสารออกจากทะเบียน', docCode(doc) + ' ' + doc.title)
+  },
+
   /** QMR แจกจ่ายเอกสารควบคุม */
   createDistribution(dist: Omit<Distribution, 'id' | 'sentAt'>) {
     const full: Distribution = { ...dist, id: uid('dist'), sentAt: now() }
