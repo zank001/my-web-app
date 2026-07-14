@@ -40,6 +40,7 @@ export const departments: Department[] = [
  * ใช้อีเมลเหล่านี้ล็อกอินในโหมดสาธิต
  */
 export const users: User[] = [
+  { id: 'u-admin',       name: 'ผู้ดูแลระบบ',            position: 'ผู้ดูแลระบบสารสนเทศ',              email: 'admin@paihospital.go.th',    role: 'admin',    deptCode: 'IM' },
   { id: 'u-wattanachai', name: 'นพ.วัฒนชัย วิเศษสมิต',  position: 'ผู้อำนวยการโรงพยาบาล',            email: 'director@paihospital.go.th', role: 'director', deptCode: 'ADM' },
   { id: 'u-patiphan',    name: 'ภก.ปฏิภาณ คำมาเร็ว',   position: 'เภสัชกร · เลขานุการศูนย์คุณภาพ',   email: 'qmr@paihospital.go.th',      role: 'qmr',      deptCode: 'QMR' },
   { id: 'u-uraiporn',    name: 'นางอุไรพร วิเศษสมิต',   position: 'พยาบาลวิชาชีพชำนาญการ · ศูนย์คุณภาพ', email: 'review@paihospital.go.th', role: 'qmr',      deptCode: 'QMR' },

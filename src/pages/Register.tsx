@@ -1,19 +1,25 @@
-import { ChevronDown, ChevronRight, Download, FileText, Flame } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Download, FileText, Flame, Pencil, Trash2, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import Card from '../components/Card'
 import { LevelBadge, StatusBadge } from '../components/Badges'
-import { useStore } from '../data/store'
+import { actions, useStore } from '../data/store'
 import { docCode, formatDate, levelLabel, statusLabel } from '../lib/format'
-import type { DocLevel, DocumentStatus } from '../types'
+import { can } from '../lib/permissions'
+import type { Department, DocLevel, DocumentStatus, QualityDocument } from '../types'
 
 const levels: Array<DocLevel | 'all'> = ['all', 'QM', 'SOP', 'WI', 'FM', 'EXT']
+const docLevels: DocLevel[] = ['QM', 'SOP', 'WI', 'FM', 'EXT']
 
 export default function Register({ query, onQuery }: { query: string; onQuery: (q: string) => void }) {
   const docs = useStore((s) => s.documents)
   const depts = useStore((s) => s.departments)
+  const me = useStore((s) => s.users.find((u) => u.id === s.currentUserId))
+  const canManage = me ? can.manageDocuments(me.role) : false
   const [level, setLevel] = useState<DocLevel | 'all'>('all')
   const [status, setStatus] = useState<DocumentStatus | 'all'>('all')
   const [open, setOpen] = useState<string | null>(null)
+  const [editing, setEditing] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
 
   const list = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -142,6 +148,44 @@ export default function Register({ query, onQuery }: { query: string; onQuery: (
                       <tr className="bg-slate-50/60">
                         <td></td>
                         <td colSpan={7} className="px-3 pb-4 pt-1">
+                          {editing === d.id ? (
+                            <EditForm doc={d} depts={depts} onClose={() => setEditing(null)} />
+                          ) : (
+                          <>
+                          {canManage && (
+                            <div className="mb-3 flex flex-wrap items-center gap-2">
+                              <button
+                                onClick={() => { setEditing(d.id); setConfirmDelete(null) }}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                              >
+                                <Pencil size={13} /> แก้ไขเอกสาร
+                              </button>
+                              {confirmDelete === d.id ? (
+                                <span className="inline-flex items-center gap-2 rounded-lg bg-rose-50 px-3 py-1.5 text-xs text-rose-700">
+                                  ยืนยันลบเอกสารนี้ถาวร?
+                                  <button
+                                    onClick={() => { actions.deleteDocument(d.id); setConfirmDelete(null); setOpen(null) }}
+                                    className="rounded-md bg-rose-600 px-2 py-1 font-semibold text-white hover:bg-rose-700"
+                                  >
+                                    ลบถาวร
+                                  </button>
+                                  <button
+                                    onClick={() => setConfirmDelete(null)}
+                                    className="rounded-md border border-slate-200 bg-white px-2 py-1 font-semibold text-slate-600 hover:bg-slate-50"
+                                  >
+                                    ยกเลิก
+                                  </button>
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => setConfirmDelete(d.id)}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                                >
+                                  <Trash2 size={13} /> ลบ
+                                </button>
+                              )}
+                            </div>
+                          )}
                           <div className="grid gap-4 lg:grid-cols-3">
                             <div className="lg:col-span-2">
                               <div className="mb-1 text-xs font-semibold text-slate-500">สาระสำคัญ</div>
@@ -177,6 +221,8 @@ export default function Register({ query, onQuery }: { query: string; onQuery: (
                               </div>
                             </div>
                           </div>
+                          </>
+                          )}
                         </td>
                       </tr>
                     )}
@@ -205,3 +251,82 @@ const Sig = ({ label, name }: { label: string; name: string }) => (
     <div className="font-medium text-slate-700">{name}</div>
   </div>
 )
+
+const fieldCls = 'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100'
+
+/** ฟอร์มแก้ไขข้อมูลเอกสารในทะเบียน (เฉพาะผู้ดูแลระบบ) */
+function EditForm({ doc, depts, onClose }: { doc: QualityDocument; depts: Department[]; onClose: () => void }) {
+  const [title, setTitle] = useState(doc.title)
+  const [level, setLevel] = useState<DocLevel>(doc.level)
+  const [deptCode, setDeptCode] = useState(doc.deptCode)
+  const [seq, setSeq] = useState(doc.seq)
+  const [revision, setRevision] = useState(doc.revision)
+  const [status, setStatus] = useState<DocumentStatus>(doc.status)
+  const [summary, setSummary] = useState(doc.summary)
+
+  const save = () => {
+    actions.editDocument(doc.id, {
+      title: title.trim() || doc.title,
+      level, deptCode,
+      seq: Math.max(1, Math.floor(seq) || 1),
+      revision: Math.max(1, Math.floor(revision) || 1),
+      status, summary: summary.trim(),
+    })
+    onClose()
+  }
+
+  return (
+    <div className="rounded-xl border border-brand-100 bg-white p-4">
+      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-brand-700">
+        <Pencil size={14} /> แก้ไขข้อมูลเอกสาร
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <label className="sm:col-span-2 lg:col-span-4">
+          <span className="mb-1 block text-xs font-semibold text-slate-600">ชื่อเรื่อง</span>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} className={fieldCls} />
+        </label>
+        <label>
+          <span className="mb-1 block text-xs font-semibold text-slate-600">ระดับ</span>
+          <select value={level} onChange={(e) => setLevel(e.target.value as DocLevel)} className={fieldCls}>
+            {docLevels.map((l) => <option key={l} value={l}>{l} — {levelLabel[l]}</option>)}
+          </select>
+        </label>
+        <label>
+          <span className="mb-1 block text-xs font-semibold text-slate-600">หน่วยงาน</span>
+          <select value={deptCode} onChange={(e) => setDeptCode(e.target.value)} className={fieldCls}>
+            {depts.map((x) => <option key={x.code} value={x.code}>{x.code} — {x.nameTh}</option>)}
+          </select>
+        </label>
+        <label>
+          <span className="mb-1 block text-xs font-semibold text-slate-600">ลำดับที่ (XXX)</span>
+          <input type="number" min={1} value={seq} onChange={(e) => setSeq(Number(e.target.value))} className={fieldCls} />
+        </label>
+        <label>
+          <span className="mb-1 block text-xs font-semibold text-slate-600">แก้ไขครั้งที่ (YY)</span>
+          <input type="number" min={1} value={revision} onChange={(e) => setRevision(Number(e.target.value))} className={fieldCls} />
+        </label>
+        <label className="sm:col-span-2">
+          <span className="mb-1 block text-xs font-semibold text-slate-600">สถานะ</span>
+          <select value={status} onChange={(e) => setStatus(e.target.value as DocumentStatus)} className={fieldCls}>
+            {(Object.keys(statusLabel) as DocumentStatus[]).map((s) => <option key={s} value={s}>{statusLabel[s]}</option>)}
+          </select>
+        </label>
+        <label className="sm:col-span-2 lg:col-span-4">
+          <span className="mb-1 block text-xs font-semibold text-slate-600">สาระสำคัญ</span>
+          <textarea value={summary} onChange={(e) => setSummary(e.target.value)} rows={3} className={fieldCls + ' resize-y'} />
+        </label>
+      </div>
+      <div className="mt-1 text-[11px] text-slate-400">
+        รหัสใหม่: <span className="font-mono font-semibold text-brand-700">{docCode({ level, deptCode, seq, revision } as QualityDocument)}</span>
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        <button onClick={save} className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
+          <Check size={15} /> บันทึกการแก้ไข
+        </button>
+        <button onClick={onClose} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+          <X size={15} /> ยกเลิก
+        </button>
+      </div>
+    </div>
+  )
+}
