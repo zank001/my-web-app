@@ -134,6 +134,23 @@ function tableToLines(tbl: Element, label: (p: Element) => string): string[] {
   return rows
 }
 
+/**
+ * ดึงข้อความทั้งหมดจากไฟล์ .docx รวมทุกตาราง (ไม่ข้ามตารางแม่แบบ) — ใช้ตรวจจับ
+ * รหัสเอกสาร/ระดับ ที่มักอยู่ในตารางลงนาม/หัวกระดาษ ซึ่ง extractDocxText ตัดออก
+ */
+export function extractDocxAllText(buf: ArrayBuffer): string {
+  let files: Record<string, Uint8Array>
+  try {
+    files = unzipSync(new Uint8Array(buf))
+  } catch {
+    return ''
+  }
+  const xml = files['word/document.xml']
+  if (!xml) return ''
+  const dom = new DOMParser().parseFromString(strFromU8(xml), 'application/xml')
+  return textsOf(dom.documentElement).replace(/[ \t\r\n]+/g, ' ')
+}
+
 /** ดึงเนื้อหาจากไฟล์ .docx ตามลำดับจริง — ย่อหน้าเป็นบรรทัด (พร้อมเลขข้ออัตโนมัติ) ตารางเป็นบรรทัด | คั่นเซลล์ | */
 export function extractDocxText(buf: ArrayBuffer): string {
   let files: Record<string, Uint8Array>

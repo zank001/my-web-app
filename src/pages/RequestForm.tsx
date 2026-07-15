@@ -1,8 +1,9 @@
-import { CheckCircle2, FileUp, Info } from 'lucide-react'
+import { CheckCircle2, FileUp, Info, Loader2, Sparkles } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import Card from '../components/Card'
 import { actions, nextSeq, useStore } from '../data/store'
 import { approvalMatrix, docCode, levelLabel, requestKindLabel } from '../lib/format'
+import { detectCode, extractDocxAllText, extractDocxText, heuristicSplit } from '../lib/importDoc'
 import type { DocLevel, RequestKind } from '../types'
 
 /** แบบฟอร์มดิจิทัลแทน FM-QMR-001 — ใบขอขึ้นทะเบียนใหม่/ปรับปรุงแก้ไข/ยกเลิก */
@@ -20,6 +21,8 @@ export default function RequestForm({ onDone }: { onDone: () => void }) {
   const [proposer, setProposer] = useState(me?.name ?? '')
   const [position, setPosition] = useState(me?.position ?? '')
   const [file, setFile] = useState<File | null>(null)
+  const [importing, setImporting] = useState(false)
+  const [importInfo, setImportInfo] = useState('')
   const [submitted, setSubmitted] = useState(false)
 
   const controlledDocs = useMemo(
@@ -27,6 +30,57 @@ export default function RequestForm({ onDone }: { onDone: () => void }) {
     [docs],
   )
   const targetDoc = docs.find((d) => d.id === targetDocId)
+
+  /** แนบไฟล์แล้วเติมฟอร์มให้อัตโนมัติจากเนื้อหาไฟล์ (.docx/.txt) */
+  const onAttach = async (f: File | null) => {
+    setFile(f)
+    setImportInfo('')
+    if (!f) return
+    const lower = f.name.toLowerCase()
+    if (!lower.endsWith('.docx') && !lower.endsWith('.txt')) {
+      setImportInfo('แนบไฟล์แล้ว — การเติมอัตโนมัติรองรับเฉพาะ .docx และ .txt (ไฟล์ PDF ยังต้องกรอกเอง)')
+      return
+    }
+    setImporting(true)
+    try {
+      let text: string
+      let meta: ReturnType<typeof detectCode> = {}
+      if (lower.endsWith('.docx')) {
+        const buf = await f.arrayBuffer()
+        text = extractDocxText(buf)
+        // รหัสเอกสาร/ระดับ มักอยู่ในตารางลงนาม/หัวกระดาษที่เนื้อหาหลักตัดออก — อ่านจากข้อความทั้งไฟล์
+        meta = detectCode(extractDocxAllText(buf))
+      } else {
+        text = await f.text()
+        meta = detectCode(text)
+      }
+      const r = heuristicSplit(text)
+      const level = meta.level ?? r.level
+      const deptCode = meta.deptCode ?? r.deptCode
+      const objective = r.sections.objective?.trim()
+      const filled: string[] = []
+
+      if (kind === 'new') {
+        if (level) { setLevel(level); filled.push('ระดับเอกสาร') }
+        if (deptCode && depts.some((d) => d.code === deptCode)) { setDeptCode(deptCode); filled.push('หน่วยงาน') }
+        if (r.title) { setTitle(r.title); filled.push('ชื่อเรื่อง') }
+      } else {
+        // ปรับปรุง/ยกเลิก: จับคู่รหัสในไฟล์กับเอกสารควบคุมที่มีอยู่ (ไม่สนครั้งที่แก้ไข)
+        const base = (c: string) => c.replace(/-\d+$/, '')
+        const match = meta.code ? controlledDocs.find((d) => base(docCode(d)) === base(meta.code!)) : undefined
+        if (match) { setTargetDocId(match.id); filled.push(`เอกสาร ${docCode(match)}`) }
+      }
+
+      if (objective) { setReason(objective); filled.push('เหตุผล (จากวัตถุประสงค์)') }
+      setImportInfo(filled.length
+        ? `เติมให้แล้ว: ${filled.join(' · ')} — ตรวจแก้ก่อนส่งได้`
+        : 'อ่านไฟล์แล้ว แต่ไม่พบข้อมูลที่จับคู่ได้อัตโนมัติ กรุณากรอกเอง')
+    } catch (e) {
+      setImportInfo(e instanceof Error ? e.message : 'อ่านไฟล์ไม่สำเร็จ')
+    } finally {
+      setImporting(false)
+    }
+  }
 
   // ตัวอย่างรหัสที่ระบบจะออกให้เมื่ออนุมัติ (ลำดับถัดไปของระดับ+หน่วยงาน)
   const previewCode = kind === 'new'
@@ -155,15 +209,18 @@ export default function RequestForm({ onDone }: { onDone: () => void }) {
           </Card>
 
           {kind !== 'cancel' && (
-            <Card title="แนบต้นฉบับ (กรณีขึ้นทะเบียนใหม่/ขอแก้ไข)">
+            <Card title={<span className="flex items-center gap-2"><Sparkles size={15} className="text-brand-600" /> แนบต้นฉบับ — เติมฟอร์มให้อัตโนมัติ</span>}>
               <label className="grid cursor-pointer place-items-center gap-2 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center hover:border-brand-300 hover:bg-brand-50">
-                <input type="file" className="hidden" accept=".pdf,.doc,.docx" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-                <FileUp size={26} className="text-slate-400" />
-                <div className="text-sm font-semibold">{file ? file.name : 'แนบไฟล์ต้นฉบับ (PDF/DOCX)'}</div>
+                <input type="file" className="hidden" accept=".pdf,.doc,.docx,.txt" onChange={(e) => onAttach(e.target.files?.[0] ?? null)} />
+                {importing ? <Loader2 size={26} className="animate-spin text-brand-500" /> : <FileUp size={26} className="text-slate-400" />}
+                <div className="text-sm font-semibold">{file ? file.name : 'แนบไฟล์ต้นฉบับ (DOCX/TXT/PDF)'}</div>
                 <div className="text-[11px] text-slate-500">
-                  พิมพ์ด้วย TH Sarabun New 16 · ระยะขอบ บน-ล่าง 1.91 ซม. ซ้าย-ขวา 2.54 ซม.
+                  {importing ? 'กำลังอ่านไฟล์และเติมข้อมูล…' : 'แนบ .docx / .txt แล้วระบบจะเติมระดับ หน่วยงาน ชื่อเรื่อง และเหตุผลให้'}
                 </div>
               </label>
+              {importInfo && (
+                <div className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">✓ {importInfo}</div>
+              )}
             </Card>
           )}
         </div>
