@@ -18,11 +18,28 @@ export interface CloudConfig {
   storageBucket?: string
   messagingSenderId?: string
   appId?: string
+  measurementId?: string
+}
+
+/**
+ * โปรเจกต์ Firebase ของโรงพยาบาลปาย (ฝังมากับระบบ — เชื่อมต่ออัตโนมัติทุกครั้ง)
+ *
+ * Firebase web config ไม่ใช่ความลับ (Google ออกแบบให้ฝังในเว็บฝั่งผู้ใช้ได้) —
+ * การคุมสิทธิ์เข้าถึงข้อมูลทำที่ Firestore Rules ไม่ใช่ที่ค่า config นี้
+ */
+const BUILTIN_CONFIG: CloudConfig = {
+  apiKey: 'AIzaSyDo7q3UyktQQFCnkf9CgBwVJmsWt4hfDr0',
+  authDomain: 'qmr-pai.firebaseapp.com',
+  projectId: 'qmr-pai',
+  storageBucket: 'qmr-pai.firebasestorage.app',
+  messagingSenderId: '715127714873',
+  appId: '1:715127714873:web:c7a5bf191608e5f52449e8',
+  measurementId: 'G-VYBLCSXJK6',
 }
 
 const CFG_KEY = 'qmr_cloud_config'
 
-export function getCloudConfig(): CloudConfig | null {
+const envConfig = (): CloudConfig | null => {
   const env = import.meta.env
   if (env.VITE_FIREBASE_API_KEY && env.VITE_FIREBASE_PROJECT_ID) {
     return {
@@ -34,6 +51,10 @@ export function getCloudConfig(): CloudConfig | null {
       appId: env.VITE_FIREBASE_APP_ID,
     }
   }
+  return null
+}
+
+const customConfig = (): CloudConfig | null => {
   try {
     const raw = localStorage.getItem(CFG_KEY)
     if (!raw) return null
@@ -44,9 +65,17 @@ export function getCloudConfig(): CloudConfig | null {
   }
 }
 
+/** ลำดับความสำคัญ: env (ตอน build) → ที่ผู้ใช้ตั้งเอง → ค่าที่ฝังมากับระบบ */
+export function getCloudConfig(): CloudConfig | null {
+  return envConfig() ?? customConfig() ?? BUILTIN_CONFIG
+}
+
+/** ที่มาของ config ที่ใช้อยู่ */
+export const cloudConfigSource = (): 'env' | 'custom' | 'builtin' =>
+  envConfig() ? 'env' : customConfig() ? 'custom' : 'builtin'
+
 export const hasCloudConfig = () => getCloudConfig() !== null
-export const cloudConfigFromEnv = () =>
-  Boolean(import.meta.env.VITE_FIREBASE_API_KEY && import.meta.env.VITE_FIREBASE_PROJECT_ID)
+export const cloudConfigFromEnv = () => Boolean(envConfig())
 
 /**
  * รับข้อความที่วางจากหน้า Firebase Console ได้ตรงๆ — ทั้ง JSON แท้ และ snippet
