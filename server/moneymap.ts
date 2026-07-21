@@ -56,24 +56,55 @@ const DEFAULT_STATE: MoneymapState = {
   ],
 }
 
+const ASSET_CLASSES: AssetClass[] = ['thai-equity', 'foreign-equity', 'gold', 'bond', 'cash']
+
+/** ตรวจ/ทำความสะอาดรายการสินทรัพย์หนึ่งรายการ — คืน null ถ้าข้อมูลใช้ไม่ได้ */
+function sanitizeHolding(raw: unknown): Holding | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const symbol = typeof r.symbol === 'string' ? r.symbol.trim() : ''
+  const name = typeof r.name === 'string' && r.name.trim() ? r.name.trim() : symbol
+  const units = Number(r.units)
+  const source: PriceSource | null = r.source === 'finnomena' ? 'finnomena' : r.source === 'yahoo' ? 'yahoo' : null
+  const currency = r.currency === 'USD' ? 'USD' : r.currency === 'THB' ? 'THB' : null
+  const assetClass = ASSET_CLASSES.includes(r.assetClass as AssetClass) ? (r.assetClass as AssetClass) : null
+  if (!symbol || !source || !currency || !assetClass || !Number.isFinite(units) || units < 0) return null
+  const holding: Holding = { symbol, name, units, source, currency, assetClass }
+  const cost = Number(r.costPerUnit)
+  if (Number.isFinite(cost) && cost > 0) holding.costPerUnit = cost
+  const current = Number(r.currentPrice)
+  if (Number.isFinite(current) && current > 0) holding.currentPrice = current
+  return holding
+}
+
 async function readState(): Promise<MoneymapState> {
+  let raw: string
   try {
-    const raw = await fs.readFile(STATE_FILE, 'utf8')
+    raw = await fs.readFile(STATE_FILE, 'utf8')
+  } catch {
+    // ยังไม่มีไฟล์ — seed ค่าตั้งต้นเพื่อให้แอปใช้งานได้ทันที
+    await writeState(DEFAULT_STATE).catch(() => {})
+    return DEFAULT_STATE
+  }
+  try {
     const parsed = JSON.parse(raw) as Partial<MoneymapState>
     if (!Array.isArray(parsed.holdings)) throw new Error('holdings missing')
     return {
       settings: { usdThbFallback: Number(parsed.settings?.usdThbFallback) || DEFAULT_STATE.settings.usdThbFallback },
-      holdings: parsed.holdings as Holding[],
+      holdings: parsed.holdings.map(sanitizeHolding).filter((h): h is Holding => h !== null),
     }
-  } catch {
-    // ไฟล์ยังไม่มีหรือพัง — สร้างใหม่จากค่าตั้งต้นเพื่อให้แอปใช้งานได้ทันที
-    await writeState(DEFAULT_STATE).catch(() => {})
+  } catch (err) {
+    // ไฟล์พัง/parse ไม่ได้ — อย่าเขียนทับข้อมูลผู้ใช้ ใช้ค่าตั้งต้นเฉพาะใน memory
+    console.warn('[moneymap] state file unreadable, using defaults in memory:', err)
     return DEFAULT_STATE
   }
 }
 
+/** เขียนแบบ atomic (tmp + rename) กันไฟล์พังจากการเขียนค้างครึ่งทาง */
 async function writeState(state: MoneymapState): Promise<void> {
-  await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2) + '\n', 'utf8')
+  const tmp = `${STATE_FILE}.tmp`
+  await fs.writeFile(tmp, JSON.stringify(state, null, 2) + '\n', 'utf8')
+  await fs.rename(tmp, STATE_FILE)
 }
 
 // ---------------------------------------------------------------------------
@@ -83,6 +114,22 @@ async function writeState(state: MoneymapState): Promise<void> {
 const FETCH_TIMEOUT_MS = 10_000
 // Yahoo ปฏิเสธ request ที่ไม่มี User-Agent แบบเบราว์เซอร์
 const YAHOO_HEADERS = { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36', Accept: 'application/json' }
+
+/** เลือก range ของ Yahoo ที่ครอบคลุมจำนวนเดือนที่ขอ */
+function yahooRange(months: number): string {
+  if (months <= 2) return '3mo'
+  if (months <= 5) return '6mo'
+  if (months <= 11) return '1y'
+  return '2y'
+}
+
+/** เลือก range ของ Finnomena ที่ครอบคลุมจำนวนเดือนที่ขอ */
+function finnomenaRange(months: number): string {
+  if (months <= 2) return '3M'
+  if (months <= 5) return '6M'
+  if (months <= 11) return '1Y'
+  return '3Y'
+}
 
 /** ราคาปิดรายวันจาก Yahoo Finance (query1.finance.yahoo.com) */
 async function fetchYahooDaily(symbol: string, range = '6mo'): Promise<PricePoint[] | null> {
@@ -108,9 +155,9 @@ async function fetchYahooDaily(symbol: string, range = '6mo'): Promise<PricePoin
 }
 
 /** NAV ย้อนหลังของกองทุนรวมไทยจาก API สาธารณะของ Finnomena */
-async function fetchFinnomenaNavs(symbol: string): Promise<PricePoint[] | null> {
+async function fetchFinnomenaNavs(symbol: string, range = '6M'): Promise<PricePoint[] | null> {
   try {
-    const url = `https://www.finnomena.com/fn3/api/fund/v2/public/funds/${encodeURIComponent(symbol)}/navs?range=6M`
+    const url = `https://www.finnomena.com/fn3/api/fund/v2/public/funds/${encodeURIComponent(symbol)}/navs?range=${encodeURIComponent(range)}`
     const res = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
     if (!res.ok) return null
     const json = (await res.json()) as any
@@ -189,19 +236,29 @@ function dateAxis(months: number): string[] {
   const out: string[] = []
   const end = new Date()
   end.setUTCHours(0, 0, 0, 0)
+  // ลบเดือนโดยไม่ให้วันสิ้นเดือนล้น (31 ส.ค. − 6 เดือน ต้องได้ 28/29 ก.พ. ไม่ใช่ 2-3 มี.ค.)
+  const day = end.getUTCDate()
   const start = new Date(end)
+  start.setUTCDate(1)
   start.setUTCMonth(start.getUTCMonth() - months)
+  const daysInMonth = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0)).getUTCDate()
+  start.setUTCDate(Math.min(day, daysInMonth))
   for (const d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) out.push(toISODate(d))
   return out
 }
 
 /**
  * จัดราคาให้ตรงแกนวันที่: วันที่ไม่มีข้อมูล (วันหยุดตลาด) ใช้ราคาล่าสุดก่อนหน้า
- * ช่วงก่อนจุดข้อมูลแรกถมด้วยราคาแรกที่รู้ เพื่อให้ทุก series ยาวเท่ากัน
+ * จุดเริ่มแกนใช้ราคาล่าสุด "ก่อนหรือเท่ากับ" วันแรกของแกน (ถ้าไม่มีเลยจึงถมด้วยราคาแรกที่รู้)
  */
 function alignToAxis(points: PricePoint[], axis: string[]): number[] {
-  const byDate = new Map(points.map((p) => [p.date, p.price]))
-  let last = points[0]?.price ?? 0
+  const sorted = [...points].sort((a, b) => a.date.localeCompare(b.date))
+  const byDate = new Map(sorted.map((p) => [p.date, p.price]))
+  let last = sorted[0]?.price ?? 0
+  for (const p of sorted) {
+    if (p.date > axis[0]) break
+    last = p.price
+  }
   return axis.map((date) => {
     const v = byDate.get(date)
     if (v !== undefined) last = v
@@ -218,10 +275,10 @@ interface ResolvedSeries {
 }
 
 /** หา series ราคาของสินทรัพย์หนึ่งตัวตามลำดับ: ราคาจริง → benchmark → synthetic */
-async function resolveSeries(holding: Holding, axis: string[]): Promise<ResolvedSeries> {
+async function resolveSeries(holding: Holding, axis: string[], months: number): Promise<ResolvedSeries> {
   const real = holding.source === 'finnomena'
-    ? await fetchFinnomenaNavs(holding.symbol)
-    : await fetchYahooDaily(holding.symbol)
+    ? await fetchFinnomenaNavs(holding.symbol, finnomenaRange(months))
+    : await fetchYahooDaily(holding.symbol, yahooRange(months))
   if (real) {
     return { holding, source: holding.source, prices: alignToAxis(real, axis), lastPrice: real[real.length - 1].price }
   }
@@ -230,7 +287,7 @@ async function resolveSeries(holding: Holding, axis: string[]): Promise<Resolved
   const anchorPrice = holding.currentPrice ?? holding.costPerUnit
   if (anchorPrice) {
     for (const benchSymbol of BENCHMARKS[holding.assetClass] ?? []) {
-      const bench = await fetchYahooDaily(benchSymbol)
+      const bench = await fetchYahooDaily(benchSymbol, yahooRange(months))
       if (!bench) continue
       const benchLast = bench[bench.length - 1].price
       const scaled = bench.map((p) => ({ date: p.date, price: (p.price * anchorPrice) / benchLast }))
@@ -244,8 +301,8 @@ async function resolveSeries(holding: Holding, axis: string[]): Promise<Resolved
 }
 
 /** อัตราแลกเปลี่ยน USD→THB รายวัน (THB=X) — ถ้าดึงไม่ได้ใช้ค่าคงที่จาก settings */
-async function resolveFxSeries(axis: string[], fallbackRate: number): Promise<{ rates: number[]; latest: number; live: boolean }> {
-  const real = await fetchYahooDaily('THB=X')
+async function resolveFxSeries(axis: string[], fallbackRate: number, months: number): Promise<{ rates: number[]; latest: number; live: boolean }> {
+  const real = await fetchYahooDaily('THB=X', yahooRange(months))
   if (real) {
     const rates = alignToAxis(real, axis)
     return { rates, latest: rates[rates.length - 1], live: true }
@@ -263,22 +320,43 @@ let historyCache: { key: string; expires: number; payload: unknown } | null = nu
 export const moneymapRouter = Router()
 
 moneymapRouter.get('/api/moneymap/state', async (_req, res) => {
-  res.json(await readState())
+  try {
+    res.json(await readState())
+  } catch (err) {
+    console.error('[moneymap] read state failed:', err)
+    res.status(500).json({ error: 'อ่านข้อมูลพอร์ตไม่สำเร็จ' })
+  }
 })
 
 moneymapRouter.put('/api/moneymap/state', async (req, res) => {
-  const body = req.body as Partial<MoneymapState>
-  if (!Array.isArray(body?.holdings)) {
-    return res.status(400).json({ error: 'holdings array required' })
+  try {
+    const body = req.body as Partial<MoneymapState>
+    if (!Array.isArray(body?.holdings)) {
+      return res.status(400).json({ error: 'holdings array required' })
+    }
+    // validate ทุกรายการก่อนบันทึก — ข้อมูลพังรายการเดียวต้องไม่ทำให้ /api/portfolio/history ล้มถาวร
+    const holdings: Holding[] = []
+    for (let i = 0; i < body.holdings.length; i++) {
+      const clean = sanitizeHolding(body.holdings[i])
+      if (!clean) {
+        return res.status(400).json({
+          error: `holdings[${i}] ไม่ถูกต้อง: ต้องมี symbol, units ≥ 0, source (yahoo|finnomena), currency (THB|USD), assetClass (${ASSET_CLASSES.join('|')})`,
+        })
+      }
+      holdings.push(clean)
+    }
+    const current = await readState()
+    const next: MoneymapState = {
+      settings: { usdThbFallback: Number(body.settings?.usdThbFallback) || current.settings.usdThbFallback },
+      holdings,
+    }
+    await writeState(next)
+    historyCache = null
+    res.json({ ok: true, holdings: holdings.length })
+  } catch (err) {
+    console.error('[moneymap] write state failed:', err)
+    res.status(500).json({ error: 'บันทึกข้อมูลพอร์ตไม่สำเร็จ' })
   }
-  const current = await readState()
-  const next: MoneymapState = {
-    settings: { usdThbFallback: Number(body.settings?.usdThbFallback) || current.settings.usdThbFallback },
-    holdings: body.holdings as Holding[],
-  }
-  await writeState(next)
-  historyCache = null
-  res.json({ ok: true })
 })
 
 moneymapRouter.get('/api/portfolio/history', async (req, res) => {
@@ -292,8 +370,8 @@ moneymapRouter.get('/api/portfolio/history', async (req, res) => {
 
     const axis = dateAxis(months)
     // ยิงทุก request พร้อมกัน: FX หนึ่งชุด + series ราคาของแต่ละสินทรัพย์
-    const fxPromise = resolveFxSeries(axis, state.settings.usdThbFallback)
-    const series = await Promise.all(state.holdings.map((h) => resolveSeries(h, axis)))
+    const fxPromise = resolveFxSeries(axis, state.settings.usdThbFallback, months)
+    const series = await Promise.all(state.holdings.map((h) => resolveSeries(h, axis, months)))
     const fx = await fxPromise
 
     // รวมมูลค่ารายวัน: ราคา × จำนวนหน่วย (× USD/THB สำหรับสินทรัพย์สกุล USD)

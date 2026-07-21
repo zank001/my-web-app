@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   CartesianGrid,
   Line,
@@ -31,11 +31,11 @@ const thaiShortDate = (iso: string) =>
 const thaiFullDate = (iso: string) =>
   new Date(`${iso}T00:00:00`).toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' })
 
-/** ย่อตัวเลขแกน Y: 1,500 → "1.5k", 2,400,000 → "2.4M" */
+/** ย่อตัวเลขแกน Y: 12,500 → "12.5k", 2,400,000 → "2.4M" (ค่าที่ปัดแล้วถึงล้านขึ้นไปใช้ M) */
 const compactValue = (v: number) => {
   const abs = Math.abs(v)
-  if (abs >= 1_000_000) return `${(v / 1_000_000).toLocaleString('en-US', { maximumFractionDigits: 1 })}M`
-  if (abs >= 1_000) return `${(v / 1_000).toLocaleString('en-US', { maximumFractionDigits: 0 })}k`
+  if (abs >= 999_500) return `${(v / 1_000_000).toLocaleString('en-US', { maximumFractionDigits: 1 })}M`
+  if (abs >= 1_000) return `${(v / 1_000).toLocaleString('en-US', { maximumFractionDigits: 1 })}k`
   return v.toLocaleString('en-US', { maximumFractionDigits: 0 })
 }
 
@@ -114,8 +114,11 @@ export default function InvestmentsTab() {
   const [history, setHistory] = useState<PortfolioHistory | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // ลำดับ request ล่าสุด — กัน response ที่มาช้ากว่าเขียนทับข้อมูลใหม่ (กดรีเฟรชรัวๆ)
+  const requestSeq = useRef(0)
 
   const fetchHistory = useCallback(async (refresh = false) => {
+    const seq = ++requestSeq.current
     setLoading(true)
     setError(null)
     try {
@@ -123,11 +126,13 @@ export default function InvestmentsTab() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = (await res.json()) as PortfolioHistory
       if (!Array.isArray(data.points) || data.points.length === 0) throw new Error('empty history')
+      if (seq !== requestSeq.current) return
       setHistory(data)
     } catch {
+      if (seq !== requestSeq.current) return
       setError('โหลดข้อมูลประวัติพอร์ตไม่สำเร็จ — ตรวจสอบว่า API server ทำงานอยู่ (npm run server)')
     } finally {
-      setLoading(false)
+      if (seq === requestSeq.current) setLoading(false)
     }
   }, [])
 
@@ -172,11 +177,19 @@ export default function InvestmentsTab() {
           </button>
         </div>
 
+        {/* รีเฟรชล้มเหลวแต่มีข้อมูลชุดเก่าอยู่ — แจ้งเตือนโดยไม่ซ่อนกราฟ/ตาราง */}
+        {!loading && error && history && (
+          <div className="mt-3 flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            รีเฟรชข้อมูลไม่สำเร็จ — กำลังแสดงข้อมูลชุดล่าสุดที่โหลดไว้
+          </div>
+        )}
+
         <div className="mt-4 h-80">
           {loading && (
             <div className="shimmer h-full w-full rounded-xl" />
           )}
-          {!loading && error && (
+          {!loading && error && !history && (
             <div className="flex h-full flex-col items-center justify-center gap-3 rounded-xl bg-slate-50 text-center">
               <AlertCircle className="h-8 w-8 text-slate-400" />
               <p className="max-w-sm text-sm text-slate-600">{error}</p>
@@ -188,7 +201,7 @@ export default function InvestmentsTab() {
               </button>
             </div>
           )}
-          {!loading && !error && history && (
+          {!loading && history && (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={points} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid vertical={false} stroke={GRID_COLOR} />
@@ -229,7 +242,7 @@ export default function InvestmentsTab() {
       </section>
 
       {/* ตารางสินทรัพย์ที่ถือครอง */}
-      {history && !error && (
+      {history && (
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex items-center justify-between px-5 pt-4">
             <h2 className="text-sm font-semibold text-slate-900">สินทรัพย์ในพอร์ต ({history.assets.length})</h2>
