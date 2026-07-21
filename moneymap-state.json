@@ -1,0 +1,55 @@
+{
+  "settings": { "usdThbFallback": 36.5 },
+  "holdings": [
+    {
+      "symbol": "AAPL",
+      "name": "Apple Inc.",
+      "units": 15,
+      "source": "yahoo",
+      "currency": "USD",
+      "assetClass": "foreign-equity",
+      "costPerUnit": 185,
+      "currentPrice": 210
+    },
+    {
+      "symbol": "VOO",
+      "name": "Vanguard S&P 500 ETF",
+      "units": 6,
+      "source": "yahoo",
+      "currency": "USD",
+      "assetClass": "foreign-equity",
+      "costPerUnit": 470,
+      "currentPrice": 510
+    },
+    {
+      "symbol": "SCBGOLD",
+      "name": "กองทุนเปิดไทยพาณิชย์โกลด์ (SCBGOLD)",
+      "units": 3500,
+      "source": "finnomena",
+      "currency": "THB",
+      "assetClass": "gold",
+      "costPerUnit": 21.4,
+      "currentPrice": 24.9
+    },
+    {
+      "symbol": "KFAFIX-A",
+      "name": "กองทุนเปิดกรุงศรีแอคทีฟตราสารหนี้-สะสมมูลค่า",
+      "units": 40000,
+      "source": "finnomena",
+      "currency": "THB",
+      "assetClass": "bond",
+      "costPerUnit": 12.6,
+      "currentPrice": 13.1
+    },
+    {
+      "symbol": "K-STAR-A(A)",
+      "name": "กองทุนเปิดเค สตาร์ หุ้นทุน-A ชนิดสะสมมูลค่า",
+      "units": 25000,
+      "source": "finnomena",
+      "currency": "THB",
+      "assetClass": "thai-equity",
+      "costPerUnit": 4.4,
+      "currentPrice": 3.95
+    }
+  ]
+}

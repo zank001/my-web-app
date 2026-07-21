@@ -5,14 +5,15 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  // หลายเว็บแยกกันใน repo เดียว: ระบบเอกสาร QMR (root), ผู้ช่วยข้อมูลยา AI (/drugai/)
-  // และแอปจัดตารางเวรบุคลากร (/schedule/)
+  // หลายเว็บแยกกันใน repo เดียว: ระบบเอกสาร QMR (root), ผู้ช่วยข้อมูลยา AI (/drugai/),
+  // แอปจัดตารางเวรบุคลากร (/schedule/) และแอปบริหารการเงิน MoneyMap (/moneymap/)
   build: {
     rollupOptions: {
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
         drugai: fileURLToPath(new URL('./drugai/index.html', import.meta.url)),
         schedule: fileURLToPath(new URL('./schedule/index.html', import.meta.url)),
+        moneymap: fileURLToPath(new URL('./moneymap/index.html', import.meta.url)),
       },
     },
   },
