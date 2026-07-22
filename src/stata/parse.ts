@@ -22,27 +22,37 @@ export interface Dataset {
   hasHeader: boolean
 }
 
-const MISSING = new Set(['', '.', 'na', 'n/a', 'null', '#n/a', '-'])
+const MISSING = new Set(['', '.', 'na', 'n/a', 'null', '#n/a', '#null!'])
 
 export function isMissingToken(s: string): boolean {
   return MISSING.has(s.trim().toLowerCase())
 }
 
-/** แปลงข้อความเป็นตัวเลข (รองรับคอมมาคั่นหลักพัน และ %) — NaN ถ้าไม่ใช่ตัวเลข */
+const THOUSANDS = /^-?\d{1,3}(,\d{3})+(\.\d+)?$/
+
+/**
+ * แปลงข้อความเป็นตัวเลข — NaN ถ้าไม่ใช่ตัวเลข
+ * รองรับคอมมาคั่นหลักพัน (1,234), ทศนิยมแบบคอมมา (1,5) และเปอร์เซ็นต์
+ */
 export function toNumber(s: string): number {
   let t = s.trim()
   if (t === '') return NaN
-  if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(t)) t = t.replace(/,/g, '')
-  if (/^-?\d+(\.\d+)?%$/.test(t)) return Number(t.slice(0, -1)) / 100
+  if (THOUSANDS.test(t)) t = t.replace(/,/g, '')
+  else if (/^-?\d+,\d+$/.test(t)) t = t.replace(',', '.')
+  if (/^-?\d+([.,]\d+)?%$/.test(t)) return Number(t.replace(',', '.').slice(0, -1)) / 100
   const v = Number(t)
   return Number.isFinite(v) ? v : NaN
 }
 
 export function detectDelimiter(text: string): string {
-  const firstLine = text.split(/\r?\n/).find((l) => l.trim() !== '') ?? ''
+  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '')
+  // นับตัวคั่นนอกเครื่องหมายคำพูดเท่านั้น
+  const firstLine = (lines[0] ?? '').replace(/"[^"]*"/g, '""')
   if (firstLine.includes('\t')) return '\t'
   const commas = (firstLine.match(/,/g) ?? []).length
   const semis = (firstLine.match(/;/g) ?? []).length
+  // คอลัมน์เดียวที่เป็นตัวเลขคั่นหลักพันล้วน (เช่น 1,234) ไม่ใช่ CSV
+  if (commas > 0 && semis === 0 && lines.every((l) => THOUSANDS.test(l.trim()))) return ' '
   if (semis > commas) return ';'
   if (commas > 0) return ','
   if (semis > 0) return ';'
@@ -136,21 +146,28 @@ export function parseTable(
   const delimiter = detectDelimiter(trimmed)
   const cells = splitCells(trimmed, delimiter)
   if (cells.length === 0) return null
-  const nCols = Math.max(...cells.map((r) => r.length))
+  let nCols = 0
+  for (const r of cells) if (r.length > nCols) nCols = r.length
   if (nCols === 0) return null
   const hasHeader = headerOverride ?? guessHeader(cells)
   const headerRow = hasHeader ? cells[0] : null
-  const body = hasHeader ? cells.slice(1) : cells
+  // ตัดแถวที่ว่างทุกเซลล์ทิ้ง (เช่นบรรทัด ",," ท้ายไฟล์จาก Excel)
+  const body = (hasHeader ? cells.slice(1) : cells).filter((row) =>
+    row.some((c) => c.trim() !== ''),
+  )
   if (body.length === 0) return null
 
   // ตั้งชื่อตัวแปร (กันชื่อว่าง/ซ้ำ)
-  const seen = new Map<string, number>()
+  const used = new Set<string>()
   const names: string[] = []
   for (let j = 0; j < nCols; j++) {
     let name = (headerRow?.[j] ?? '').trim() || `var${j + 1}`
-    const count = seen.get(name) ?? 0
-    seen.set(name, count + 1)
-    if (count > 0) name = `${name}_${count + 1}`
+    if (used.has(name)) {
+      let k = 2
+      while (used.has(`${name}_${k}`)) k++
+      name = `${name}_${k}`
+    }
+    used.add(name)
     names.push(name)
   }
 
@@ -183,8 +200,17 @@ export function parseTable(
     const numericOk =
       nonMissing.length > 0 && v.num.every((x, i) => v.raw[i] === null || Number.isFinite(x))
     v.type = numericOk ? 'numeric' : 'string'
-    v.nUnique = new Set(nonMissing).size
+    // ตัวแปรตัวเลขนับค่าไม่ซ้ำจากค่าที่แปลงแล้ว ("1" กับ "1.0" คือค่าเดียวกัน)
+    v.nUnique = numericOk
+      ? new Set(v.num.filter((x) => Number.isFinite(x))).size
+      : new Set(nonMissing).size
   }
 
   return { vars, nRows: body.length, delimiter, hasHeader }
+}
+
+/** ค่าหมวดหมู่แบบ canonical สำหรับใช้เป็นตัวแปรกลุ่ม — ตัวเลขใช้ค่าที่แปลงแล้ว ("1" = "1.0") */
+export function catValues(v: Variable): (string | null)[] {
+  if (v.type !== 'numeric') return v.raw
+  return v.num.map((x) => (Number.isFinite(x) ? String(x) : null))
 }

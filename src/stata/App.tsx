@@ -12,7 +12,7 @@ import {
   TrendingUp,
   Upload,
 } from 'lucide-react'
-import { parseTable, type Dataset, type Variable } from './parse'
+import { catValues, parseTable, type Dataset, type Variable } from './parse'
 import { pwcorr, regress, summarize, tab2, tabulate, ttest2 } from './stats'
 import {
   renderDetail,
@@ -147,7 +147,7 @@ export default function App() {
   const catVars = useMemo(
     () =>
       dataset?.vars.filter(
-        (v) => (v.type === 'string' && v.nUnique >= 1) || (v.type === 'numeric' && v.nUnique <= 10 && v.nUnique >= 2),
+        (v) => v.nUnique >= 2 && (v.type === 'string' || v.nUnique <= 10),
       ) ?? [],
     [dataset],
   )
@@ -166,12 +166,19 @@ export default function App() {
     setTVar((prev) => (names.has(prev) ? prev : (analysisVars[0]?.name ?? '')))
     const gNames = new Set(twoLevelVars.map((v) => v.name))
     setTGroup((prev) => (gNames.has(prev) ? prev : (twoLevelVars[0]?.name ?? '')))
+  }, [analysisVars, twoLevelVars])
+
+  // ตัวแปรแถว/คอลัมน์ของตารางไขว้ต้องมีอยู่จริงและต่างกันเสมอ
+  useEffect(() => {
     const cNames = catVars.filter((v) => v.nUnique <= 20).map((v) => v.name)
-    setRVar((prev) => (cNames.includes(prev) ? prev : (cNames[0] ?? '')))
-    setCVar((prev) =>
-      cNames.includes(prev) ? prev : (cNames.find((n) => n !== (cNames[0] ?? '')) ?? ''),
-    )
-  }, [analysisVars, twoLevelVars, catVars])
+    const nextR = cNames.includes(rVar) ? rVar : (cNames[0] ?? '')
+    const nextC =
+      cNames.includes(cVar) && cVar !== nextR
+        ? cVar
+        : (cNames.find((n) => n !== nextR) ?? '')
+    if (nextR !== rVar) setRVar(nextR)
+    if (nextC !== cVar) setCVar(nextC)
+  }, [catVars, rVar, cVar])
 
   const byName = (name: string): Variable | undefined => dataset?.vars.find((v) => v.name === name)
 
@@ -189,12 +196,12 @@ export default function App() {
 
   const tResult =
     tVar && tGroup && byName(tVar) && byName(tGroup)
-      ? ttest2(tVar, tGroup, byName(tVar)!.num, byName(tGroup)!.raw, tUnequal)
+      ? ttest2(tVar, tGroup, byName(tVar)!.num, catValues(byName(tGroup)!), tUnequal)
       : null
 
   const tab2Result =
     rVar && cVar && rVar !== cVar && byName(rVar) && byName(cVar)
-      ? tab2(byName(rVar)!.raw, byName(cVar)!.raw)
+      ? tab2(catValues(byName(rVar)!), catValues(byName(cVar)!))
       : null
 
   const selectCls =

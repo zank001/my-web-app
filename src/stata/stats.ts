@@ -113,7 +113,8 @@ export function gammaQ(a: number, x: number): number {
 
 /** P(|T| > |t|) สองหาง, T ~ t(df) */
 export function tTail2(t: number, df: number): number {
-  if (!Number.isFinite(t) || !(df > 0)) return NaN
+  if (Number.isNaN(t) || !(df > 0)) return NaN
+  if (!Number.isFinite(t)) return 0
   if (t === 0) return 1
   return ibeta(df / 2, 0.5, df / (df + t * t))
 }
@@ -142,9 +143,9 @@ export function tInv(p: number, df: number): number {
 
 /** P(F > f), F ~ F(df1, df2) */
 export function fTail(f: number, df1: number, df2: number): number {
-  if (!(df1 > 0) || !(df2 > 0)) return NaN
-  if (!Number.isFinite(f)) return 0
+  if (!(df1 > 0) || !(df2 > 0) || Number.isNaN(f)) return NaN
   if (f <= 0) return 1
+  if (!Number.isFinite(f)) return 0
   return ibeta(df2 / 2, df1 / 2, df2 / (df2 + df1 * f))
 }
 
@@ -608,6 +609,8 @@ export function ttest2(
     return { error: 'แต่ละกลุ่มต้องมีข้อมูลอย่างน้อย 2 ค่า' }
   const g1 = groupStats(levels[0], x1)
   const g2 = groupStats(levels[1], x2)
+  if (g1.sd === 0 && g2.sd === 0)
+    return { error: 'ค่าในแต่ละกลุ่มคงที่ (ความแปรปรวนเป็นศูนย์) จึงทดสอบ t ไม่ได้' }
   const combined = groupStats('combined', all)
   const dm = g1.mean - g2.mean
   let se: number
