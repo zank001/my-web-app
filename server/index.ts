@@ -1,9 +1,13 @@
 import 'dotenv/config'
 import express from 'express'
 import nodemailer from 'nodemailer'
+import { moneymapRouter } from './moneymap'
 
 const app = express()
 app.use(express.json())
+
+// MoneyMap — สถานะพอร์ตลงทุน + ประวัติมูลค่าพอร์ตย้อนหลัง (/api/moneymap/*, /api/portfolio/*)
+app.use(moneymapRouter)
 
 // SMTP transport — set the SMTP_* env vars in .env. When unset, falls back
 // to Ethereal's JSON transport so the dev server still responds with a

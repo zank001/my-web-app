@@ -6,3 +6,7 @@ dist
 *.log
 .vite
 *.tsbuildinfo
+
+# MoneyMap: สแนปช็อตประวัติพอร์ตที่สร้างตอน build (prebuild) — ไม่ commit
+public/moneymap-history.json
+moneymap-state.json.tmp
