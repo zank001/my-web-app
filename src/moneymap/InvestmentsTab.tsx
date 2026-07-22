@@ -191,7 +191,12 @@ export default function InvestmentsTab() {
       setSnapshot(!live)
     } catch {
       if (seq !== requestSeq.current) return
-      setError('โหลดข้อมูลประวัติพอร์ตไม่สำเร็จ — ตรวจสอบว่า API server ทำงานอยู่ (npm run server) หรือรีเฟรชอีกครั้ง')
+      // ข้อความต่างกันตามบริบท: dev แนะนำให้รัน server, production (static) ให้ลองรีเฟรช
+      setError(
+        import.meta.env.DEV
+          ? 'โหลดข้อมูลประวัติพอร์ตไม่สำเร็จ — ตรวจสอบว่า API server ทำงานอยู่ (npm run server) หรือรีเฟรชอีกครั้ง'
+          : 'โหลดข้อมูลประวัติพอร์ตไม่สำเร็จ — กรุณารีเฟรชอีกครั้ง',
+      )
     } finally {
       if (seq === requestSeq.current) setLoading(false)
     }
