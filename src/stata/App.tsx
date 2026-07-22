@@ -6,12 +6,18 @@ import {
   Eraser,
   FlaskConical,
   Grid3x3,
+  ImagePlus,
   Info,
+  Loader2,
+  Settings2,
   Sigma,
   Table2,
   TrendingUp,
   Upload,
 } from 'lucide-react'
+import AiSettings from '../components/AiSettings'
+import { getProvider, providerLabel } from '../lib/ai'
+import { extractTableFromImage } from './imageTable'
 import { catValues, parseTable, type Dataset, type Variable } from './parse'
 import { pwcorr, regress, summarize, tab2, tabulate, ttest2 } from './stats'
 import {
@@ -129,7 +135,24 @@ export default function App() {
   const [tUnequal, setTUnequal] = useState(false)
   const [rVar, setRVar] = useState<string>('')
   const [cVar, setCVar] = useState<string>('')
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+  const [showAi, setShowAi] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const imageRef = useRef<HTMLInputElement>(null)
+
+  const readImage = (file: File) => {
+    if (aiBusy) return
+    setAiBusy(true)
+    setAiError(null)
+    extractTableFromImage(file)
+      .then((tsv) => {
+        setText(tsv)
+        setHeaderOverride(null)
+      })
+      .catch((e: unknown) => setAiError(e instanceof Error ? e.message : 'อ่านรูปไม่สำเร็จ'))
+      .finally(() => setAiBusy(false))
+  }
 
   const dataset: Dataset | null = useMemo(
     () => parseTable(text, headerOverride),
@@ -244,6 +267,21 @@ export default function App() {
               >
                 <Upload size={13} /> เปิดไฟล์ CSV
               </button>
+              <button
+                onClick={() => imageRef.current?.click()}
+                disabled={aiBusy}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                title="แนบภาพถ่ายหรือสกรีนช็อตของตาราง แล้วให้ AI แปลงเป็นข้อมูล"
+              >
+                <ImagePlus size={13} /> แนบรูปตาราง (AI)
+              </button>
+              <button
+                onClick={() => setShowAi((s) => !s)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                title="เลือกผู้ให้บริการ AI สำหรับอ่านรูป"
+              >
+                <Settings2 size={13} /> ตั้งค่า AI
+              </button>
               <input
                 ref={fileRef}
                 type="file"
@@ -253,6 +291,17 @@ export default function App() {
                   const file = e.target.files?.[0]
                   if (!file) return
                   file.text().then(setText)
+                  e.target.value = ''
+                }}
+              />
+              <input
+                ref={imageRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) readImage(file)
                   e.target.value = ''
                 }}
               />
@@ -269,16 +318,55 @@ export default function App() {
               )}
             </div>
           </div>
+          {showAi && (
+            <div className="mb-3">
+              <div className="mb-1 text-xs text-slate-500">
+                ผู้ให้บริการ AI ใช้เฉพาะตอน "แนบรูปตาราง" — แบบฟรีใช้ได้ทันทีไม่ต้องมี key
+              </div>
+              <AiSettings onSaved={() => setShowAi(false)} />
+            </div>
+          )}
           <textarea
             value={text}
             onChange={(e) => {
               setText(e.target.value)
               setHeaderOverride(null)
             }}
-            placeholder={'ตัวอย่าง:\nsex\tage\tsbp\nชาย\t52\t152\nหญิง\t61\t148\n...\n\nหรือกดปุ่ม "โหลดข้อมูลตัวอย่าง" เพื่อลองใช้งานทันที'}
+            onPaste={(e) => {
+              const item = [...e.clipboardData.items].find((i) => i.type.startsWith('image/'))
+              const file = item?.getAsFile()
+              if (file) {
+                e.preventDefault()
+                readImage(file)
+              }
+            }}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              const file = [...e.dataTransfer.files].find((f) => f.type.startsWith('image/'))
+              if (file) {
+                e.preventDefault()
+                readImage(file)
+              }
+            }}
+            placeholder={'ตัวอย่าง:\nsex\tage\tsbp\nชาย\t52\t152\nหญิง\t61\t148\n...\n\nวางรูปถ่าย/สกรีนช็อตของตารางที่นี่ก็ได้ (Ctrl+V หรือลากมาวาง — AI จะแปลงเป็นข้อมูลให้)\nหรือกดปุ่ม "โหลดข้อมูลตัวอย่าง" เพื่อลองใช้งานทันที'}
             spellCheck={false}
             className="h-44 w-full resize-y rounded-xl border border-slate-300 bg-slate-50 p-3 font-mono text-xs leading-relaxed text-slate-800 focus:border-brand-500 focus:outline-none"
           />
+          {aiBusy && (
+            <div className="mt-2 flex items-center gap-2 text-xs text-brand-700">
+              <Loader2 size={14} className="animate-spin" />
+              กำลังอ่านตารางจากรูปด้วย AI ({providerLabel[getProvider()]}) …
+              รูปจะถูกส่งไปยังผู้ให้บริการนี้เพื่อแปลงเป็นข้อมูลเท่านั้น
+            </div>
+          )}
+          {aiError && !aiBusy && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-rose-600">
+              อ่านรูปไม่สำเร็จ: {aiError}
+              <button onClick={() => setShowAi(true)} className="underline hover:text-rose-700">
+                เปิดตั้งค่า AI
+              </button>
+            </div>
+          )}
           {dataset && (
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-600">
               <span className="font-medium text-slate-800">
@@ -317,7 +405,9 @@ export default function App() {
             <div className="mb-1 flex items-center gap-2 font-semibold text-slate-700">
               <Info size={15} className="text-brand-600" /> ใช้งาน 3 ขั้นตอน
             </div>
-            1. คัดลอกตารางข้อมูล (มีหัวตาราง) จาก Excel, Google Sheets หรือไฟล์ CSV
+            1. คัดลอกตารางข้อมูล (มีหัวตาราง) จาก Excel, Google Sheets หรือไฟล์ CSV —
+            หรือ<b>แนบรูปถ่าย/สกรีนช็อตของตาราง</b> (กดปุ่ม, Ctrl+V หรือลากมาวาง)
+            แล้ว AI จะแปลงเป็นข้อมูลให้
             <br />
             2. วางลงในช่องด้านบน — ระบบตรวจชนิดตัวแปรให้อัตโนมัติ
             <br />
@@ -326,8 +416,9 @@ export default function App() {
             — หน้าตาผลลัพธ์แบบเดียวกับโปรแกรม Stata คัดลอกไปใส่รายงานได้เลย
             <br />
             <span className="mt-1 inline-block text-xs text-slate-400">
-              ข้อมูลทั้งหมดคำนวณในเครื่องของคุณ ไม่ถูกส่งขึ้นเซิร์ฟเวอร์ · ค่า missing ใช้จุด
-              (.) หรือเว้นว่าง
+              ข้อมูลที่วางเป็นข้อความคำนวณในเครื่องของคุณทั้งหมด ไม่ถูกส่งขึ้นเซิร์ฟเวอร์ ·
+              เฉพาะการแนบรูป รูปจะถูกส่งไปยังผู้ให้บริการ AI ที่เลือกเพื่อแปลงเป็นตาราง ·
+              ค่า missing ใช้จุด (.) หรือเว้นว่าง
             </span>
           </section>
         )}
@@ -526,7 +617,9 @@ export default function App() {
       <footer className="border-t border-slate-200 bg-white">
         <div className="mx-auto w-full max-w-5xl px-6 py-3 text-[11px] leading-relaxed text-slate-400">
           เครื่องมือช่วยวิเคราะห์เบื้องต้น ผลลัพธ์จัดรูปแบบตามโปรแกรม Stata —
-          ข้อมูลคำนวณในเบราว์เซอร์ทั้งหมด ไม่ถูกส่งออกนอกเครื่อง ·
+          ข้อมูลข้อความคำนวณในเบราว์เซอร์ทั้งหมด ไม่ถูกส่งออกนอกเครื่อง
+          (ยกเว้นการแนบรูป ซึ่งส่งรูปให้ผู้ให้บริการ AI ที่เลือกแปลงเป็นตาราง) ·
+          ตารางที่ AI อ่านจากรูปควรตรวจทานกับต้นฉบับก่อนใช้ ·
           โปรดตรวจทานผลก่อนนำไปใช้ในงานวิจัยจริง
         </div>
       </footer>

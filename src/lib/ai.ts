@@ -171,6 +171,151 @@ async function completeGemini(key: string, model: string, user: string, maxToken
   return parts.map((p: { text?: string }) => p.text ?? '').join('').trim()
 }
 
+// ---------- แบบมีรูปภาพ (vision) ----------
+
+export interface VisionImage {
+  /** เช่น image/jpeg, image/png */
+  mimeType: string
+  /** ข้อมูลรูปเข้ารหัส base64 (ไม่รวม data: prefix) */
+  base64: string
+}
+
+/** เรียกโมเดลพร้อมแนบรูปภาพ แล้วคืนข้อความล้วน — ผู้ให้บริการตามที่ตั้งค่าไว้ */
+export async function completeVision(
+  user: string,
+  images: VisionImage[],
+  maxTokens: number,
+  system: string = SYSTEM,
+): Promise<string> {
+  const provider = getProvider()
+  const model = getModel(provider)
+  if (provider === 'free') return visionFree(model, user, images, maxTokens, system)
+
+  const key = getApiKey(provider).trim()
+  if (!key) throw new Error(`ยังไม่ได้ตั้งค่า API key ของ ${providerLabel[provider]}`)
+
+  if (provider === 'claude') return visionClaude(key, model, user, images, maxTokens, system)
+  if (provider === 'openai') return visionOpenAI(key, model, user, images, maxTokens, system)
+  return visionGemini(key, model, user, images, maxTokens, system)
+}
+
+const toDataUrl = (im: VisionImage) => `data:${im.mimeType};base64,${im.base64}`
+
+async function visionFree(
+  model: string, user: string, images: VisionImage[], maxTokens: number, system: string,
+): Promise<string> {
+  let res: Response
+  try {
+    res = await fetch('https://text.pollinations.ai/openai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model, max_tokens: maxTokens, referrer: FREE_REFERRER,
+        messages: [
+          { role: 'system', content: system },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: user },
+              ...images.map((im) => ({ type: 'image_url', image_url: { url: toDataUrl(im) } })),
+            ],
+          },
+        ],
+      }),
+    })
+  } catch {
+    throw new Error('เชื่อมต่อ AI ฟรีไม่ได้ — ตรวจสอบอินเทอร์เน็ต หรือสลับไปผู้ให้บริการอื่นในตั้งค่า AI')
+  }
+  if (!res.ok)
+    throw new Error(`AI ฟรีอ่านรูปไม่สำเร็จ (${res.status}) — บริการสาธารณะอาจหนาแน่น ลองใหม่ หรือสลับไป Gemini (ขอ key ฟรีที่ aistudio.google.com)`)
+  const data = await res.json().catch(() => null)
+  const txt = data?.choices?.[0]?.message?.content
+  if (typeof txt !== 'string' || !txt.trim())
+    throw new Error('AI ฟรีตอบกลับว่าง ลองใหม่อีกครั้ง หรือสลับผู้ให้บริการในตั้งค่า AI')
+  return txt.trim()
+}
+
+async function visionClaude(
+  key: string, model: string, user: string, images: VisionImage[], maxTokens: number, system: string,
+): Promise<string> {
+  const client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true })
+  try {
+    const msg = await client.messages.create({
+      model, max_tokens: maxTokens, system,
+      messages: [{
+        role: 'user',
+        content: [
+          ...images.map((im): Anthropic.ImageBlockParam => ({
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: im.mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+              data: im.base64,
+            },
+          })),
+          { type: 'text', text: user },
+        ],
+      }],
+    })
+    return msg.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join('\n').trim()
+  } catch (e) {
+    if (e instanceof Anthropic.AuthenticationError) throw new Error('Claude API key ไม่ถูกต้อง')
+    if (e instanceof Anthropic.RateLimitError) throw new Error('Claude: เรียกถี่เกินไป ลองใหม่อีกครั้ง')
+    if (e instanceof Anthropic.APIError) throw new Error(`Claude ผิดพลาด (${e.status ?? ''}) — ${e.message}`)
+    throw e instanceof Error ? e : new Error('Claude ผิดพลาด')
+  }
+}
+
+async function visionOpenAI(
+  key: string, model: string, user: string, images: VisionImage[], maxTokens: number, system: string,
+): Promise<string> {
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      model, max_tokens: maxTokens,
+      messages: [
+        { role: 'system', content: system },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: user },
+            ...images.map((im) => ({ type: 'image_url', image_url: { url: toDataUrl(im) } })),
+          ],
+        },
+      ],
+    }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(`OpenAI ผิดพลาด (${res.status}) — ${data?.error?.message ?? 'ตรวจสอบ key/โมเดล'}`)
+  return (data?.choices?.[0]?.message?.content ?? '').trim()
+}
+
+async function visionGemini(
+  key: string, model: string, user: string, images: VisionImage[], maxTokens: number, system: string,
+): Promise<string> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: system }] },
+      contents: [{
+        role: 'user',
+        parts: [
+          ...images.map((im) => ({ inline_data: { mime_type: im.mimeType, data: im.base64 } })),
+          { text: user },
+        ],
+      }],
+      generationConfig: { maxOutputTokens: maxTokens },
+    }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(`Gemini ผิดพลาด (${res.status}) — ${data?.error?.message ?? 'ตรวจสอบ key/โมเดล'}`)
+  const parts = data?.candidates?.[0]?.content?.parts ?? []
+  return parts.map((p: { text?: string }) => p.text ?? '').join('').trim()
+}
+
 export interface SectionCtx {
   level: string
   title: string
