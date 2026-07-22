@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "gen:history": "tsx scripts/genHistory.ts",
+    "prebuild": "tsx scripts/genHistory.ts",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "server": "tsx server/index.ts"

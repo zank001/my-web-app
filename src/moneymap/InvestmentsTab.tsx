@@ -41,11 +41,72 @@ const compactValue = (v: number) => {
 
 const baht = (v: number) => `฿${v.toLocaleString('th-TH', { maximumFractionDigits: 0 })}`
 
+/** ISO timestamp → "22 ก.ค. 2569 14:30" สำหรับหมายเหตุวันที่ของสแนปช็อต */
+const thaiTimestamp = (iso: string) =>
+  new Date(iso).toLocaleString('th-TH', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+
 const sourceLabel: Record<ResolvedSource, string> = {
   yahoo: 'Yahoo Finance',
   finnomena: 'Finnomena',
   benchmark: 'Benchmark',
   synthetic: 'ประมาณการ',
+}
+
+/** URL ของสแนปช็อต static (สร้างตอน build) — เคารพ base path ของ Vite (/my-web-app/ บน Pages) */
+const SNAPSHOT_URL = `${import.meta.env.BASE_URL}moneymap-history.json`
+
+interface LoadResult {
+  data: PortfolioHistory
+  /** true = มาจาก live API, false = สแนปช็อต static (ไม่มี backend เช่นบน GitHub Pages) */
+  live: boolean
+}
+
+const isValidHistory = (data: unknown): data is PortfolioHistory =>
+  !!data && Array.isArray((data as PortfolioHistory).points) && (data as PortfolioHistory).points.length > 0
+
+/** ลอง live API — คืน null ถ้าไม่มี backend (จะได้ fallback ไปสแนปช็อต) */
+async function tryLiveApi(refresh: boolean): Promise<PortfolioHistory | null> {
+  try {
+    const res = await fetch(`/api/portfolio/history${refresh ? '?refresh=1' : ''}`)
+    if (!res.ok) return null
+    const data = (await res.json()) as PortfolioHistory
+    return isValidHistory(data) ? data : null
+  } catch {
+    return null
+  }
+}
+
+/** อ่านสแนปช็อต static ที่สร้างตอน build — คืน null ถ้าไม่มีไฟล์ */
+async function trySnapshot(refresh: boolean): Promise<PortfolioHistory | null> {
+  try {
+    const res = await fetch(SNAPSHOT_URL, refresh ? { cache: 'no-store' } : undefined)
+    if (!res.ok) return null
+    const data = (await res.json()) as PortfolioHistory
+    return isValidHistory(data) ? data : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * โหลดข้อมูลพอร์ต โดยเลือกลำดับตามสภาพแวดล้อม:
+ *  - dev: ลอง live API ก่อน (มี server รันอยู่) แล้ว fallback สแนปช็อต
+ *  - production (static hosting เช่น GitHub Pages): ใช้สแนปช็อตก่อน — ไม่มี
+ *    backend อยู่แล้ว จึงไม่ต้อง probe /api ให้เกิด 404 รก console ทุกครั้งที่โหลด
+ */
+async function loadHistory(refresh: boolean): Promise<LoadResult> {
+  if (import.meta.env.DEV) {
+    const live = await tryLiveApi(refresh)
+    if (live) return { data: live, live: true }
+    const snap = await trySnapshot(refresh)
+    if (snap) return { data: snap, live: false }
+  } else {
+    const snap = await trySnapshot(refresh)
+    if (snap) return { data: snap, live: false }
+    const live = await tryLiveApi(refresh)
+    if (live) return { data: live, live: true }
+  }
+  throw new Error('no data source available')
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +175,8 @@ export default function InvestmentsTab() {
   const [history, setHistory] = useState<PortfolioHistory | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // true = ข้อมูลมาจากสแนปช็อต static (ไม่มี backend) — ใช้แสดงหมายเหตุ "ข้อมูล ณ วันที่..."
+  const [snapshot, setSnapshot] = useState(false)
   // ลำดับ request ล่าสุด — กัน response ที่มาช้ากว่าเขียนทับข้อมูลใหม่ (กดรีเฟรชรัวๆ)
   const requestSeq = useRef(0)
 
@@ -122,15 +185,13 @@ export default function InvestmentsTab() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/portfolio/history${refresh ? '?refresh=1' : ''}`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = (await res.json()) as PortfolioHistory
-      if (!Array.isArray(data.points) || data.points.length === 0) throw new Error('empty history')
+      const { data, live } = await loadHistory(refresh)
       if (seq !== requestSeq.current) return
       setHistory(data)
+      setSnapshot(!live)
     } catch {
       if (seq !== requestSeq.current) return
-      setError('โหลดข้อมูลประวัติพอร์ตไม่สำเร็จ — ตรวจสอบว่า API server ทำงานอยู่ (npm run server)')
+      setError('โหลดข้อมูลประวัติพอร์ตไม่สำเร็จ — ตรวจสอบว่า API server ทำงานอยู่ (npm run server) หรือรีเฟรชอีกครั้ง')
     } finally {
       if (seq === requestSeq.current) setLoading(false)
     }
@@ -164,6 +225,11 @@ export default function InvestmentsTab() {
                   </span>
                   <span className="font-normal text-slate-400">จาก {history.months} เดือนก่อน</span>
                 </div>
+                {snapshot && history.generatedAt && (
+                  <div className="mt-1 text-xs text-slate-400">
+                    ข้อมูล ณ {thaiTimestamp(history.generatedAt)} (สแนปช็อตตอน deploy — ไม่มีเซิร์ฟเวอร์เรียลไทม์)
+                  </div>
+                )}
               </>
             )}
           </div>

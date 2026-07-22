@@ -25,6 +25,8 @@ export interface PortfolioHistory {
   months: number
   usdThb: number
   fxLive: boolean
+  /** ISO timestamp ตอนที่คำนวณ — สำคัญกับสแนปช็อต static ที่อัปเดตทุกครั้งที่ deploy */
+  generatedAt?: string
   points: HistoryPoint[]
   assets: AssetSummary[]
 }
