@@ -14,6 +14,11 @@ https://zank001.github.io/my-web-app/drugai/
 🗓️ **จัดตารางเวร & ค่าตอบแทน** — แอปจัดเวรรายเดือน + ออกใบเบิกค่าตอบแทน Excel เว็บแยกใน repo เดียวกัน ไม่ต้องเข้าสู่ระบบ:
 https://zank001.github.io/my-web-app/schedule/
 
+📊 **สถิติทันใจ (Stata-style)** — วางตารางจาก Excel/CSV แล้วได้ผลวิเคราะห์สถิติทันที
+(summarize, tabulate, correlate, regress, t-test, chi-square) หน้าตาผลลัพธ์แบบ Stata
+คำนวณในเบราว์เซอร์ทั้งหมด เว็บแยกใน repo เดียวกัน ไม่ต้องเข้าสู่ระบบ:
+https://zank001.github.io/my-web-app/stata/
+
 💊 **ระบบจัดการร้านยาครบวงจร** — แยกเป็นโปรเจกต์อิสระแล้ว (เอกสารออกแบบ + ตัวระบบ):
 https://github.com/zank001/pharmacy-system
 
