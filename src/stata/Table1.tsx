@@ -5,6 +5,7 @@ import {
   autoKind,
   buildTable1,
   defaultPositiveLevel,
+  detectSusceptible,
   pText,
   type Table1VarSpec,
   type VarKind,
@@ -66,8 +67,20 @@ export default function Table1Section({ dataset }: { dataset: Dataset }) {
         .map((v) => v.name),
     )
     setIncluded(defIncluded)
-    setKinds(Object.fromEntries(dataset.vars.map((v) => [v.name, autoKind(v)])))
-    setPositives({})
+    // ตรวจจับคอลัมน์ผลความไวต่อยา (S/I/R หรือ ไว/ดื้อ) → ตั้งเป็น %susceptible อัตโนมัติ
+    const kindMap: Record<string, VarKind> = {}
+    const posMap: Record<string, string> = {}
+    for (const v of dataset.vars) {
+      const sus = detectSusceptible(levelsOf(dataset, v.name))
+      if (sus) {
+        kindMap[v.name] = 'binary'
+        posMap[v.name] = sus
+      } else {
+        kindMap[v.name] = autoKind(v)
+      }
+    }
+    setKinds(kindMap)
+    setPositives(posMap)
     setSwapGroups(false)
   }, [dataset, groupCandidates])
 
@@ -75,7 +88,7 @@ export default function Table1Section({ dataset }: { dataset: Dataset }) {
     setKinds((k) => ({ ...k, [name]: kind }))
     if (kind === 'binary' && !positives[name]) {
       const lv = levelsOf(dataset, name)
-      setPositives((p) => ({ ...p, [name]: defaultPositiveLevel(lv) }))
+      setPositives((p) => ({ ...p, [name]: detectSusceptible(lv) ?? defaultPositiveLevel(lv) }))
     }
   }
 
@@ -308,7 +321,9 @@ export default function Table1Section({ dataset }: { dataset: Dataset }) {
             {table.tests.length > 0 && <div>วิธีทดสอบ: {table.tests.join(', ')}</div>}
             <div>
               ตัวแปรต่อเนื่องแสดงเป็น Mean ± SD · ตัวแปรจัดกลุ่มแสดงเป็น n (ร้อยละภายในกลุ่ม
-              คิดจากผู้มีข้อมูล) · แถว “ไม่ระบุ (missing)” แสดงเมื่อมีข้อมูลขาดหาย ·
+              คิดจากผู้มีข้อมูล) · แถวชนิดทวิภาคแสดงร้อยละของระดับที่ระบุในวงเล็บ เช่น
+              %ไวต่อยา = จำนวนที่ไว/จำนวนที่ทดสอบ (ไม่นับที่ไม่ได้ทดสอบ) และเทียบสัดส่วนระหว่างกลุ่มโดยตรง ·
+              แถว “ไม่ระบุ (missing)” แสดงเมื่อมีข้อมูลขาดหาย ·
               ตรวจทานความเหมาะสมของการแจกแจงก่อนนำไปใช้ (ข้อมูลเบ้มากควรใช้ค่ามัธยฐาน/สถิติไม่อิงพารามิเตอร์)
             </div>
           </div>

@@ -75,6 +75,50 @@ export function defaultPositiveLevel(levels: string[]): string {
   return levels.find((l) => POSITIVE_TOKEN.test(l.trim())) ?? levels[levels.length - 1] ?? ''
 }
 
+// จำแนกผลทดสอบความไวต่อยา (antimicrobial susceptibility): S / I / R
+const SUS_S = /^(s|susceptible|sensitive|ไว|ไวต่อยา)$/i
+const SUS_I = /^(i|intermediate|ปานกลาง|มัธยะ|กึ่ง)$/i
+const SUS_R = /^(r|resistant|ดื้อ|ดื้อยา)$/i
+
+function classifyAst(level: string): 'S' | 'I' | 'R' | null {
+  const t = level.trim()
+  if (SUS_S.test(t)) return 'S'
+  if (SUS_I.test(t)) return 'I'
+  if (SUS_R.test(t)) return 'R'
+  return null
+}
+
+/**
+ * ตรวจว่าตัวแปรเป็นผลความไวต่อยา (ทุกระดับเป็น S/I/R และมีระดับ "ไว")
+ * คืนชื่อระดับ "ไว" เพื่อใช้เป็นระดับบวก (%susceptible) — ไม่ใช่ → null
+ */
+export function detectSusceptible(levels: string[]): string | null {
+  if (levels.length < 2 || levels.length > 3) return null
+  const cls = levels.map(classifyAst)
+  if (cls.some((c) => c === null)) return null
+  const si = cls.indexOf('S')
+  return si >= 0 ? levels[si] : null
+}
+
+/** ทดสอบความแตกต่างของสัดส่วนจากเมทริกซ์ (R×G): chi-square หรือ Fisher (2×2) */
+function testForMatrix(
+  counts: number[][],
+  fisherAuto: boolean,
+): { p: number | null; test: string } {
+  const R = counts.length
+  const G = R > 0 ? counts[0].length : 0
+  if (R < 2 || G < 2 || !counts.some((r) => r.some((v) => v > 0)))
+    return { p: null, test: '' }
+  const cs = chiSquareFromMatrix(counts)
+  if (R === 2 && G === 2 && fisherAuto && cs.minExpected < 5)
+    return {
+      p: fisher2x2(counts[0][0], counts[0][1], counts[1][0], counts[1][1]).p,
+      test: 'Fisher exact test',
+    }
+  if (cs.df > 0 && Number.isFinite(cs.p)) return { p: cs.p, test: 'Pearson chi-square' }
+  return { p: null, test: '' }
+}
+
 export function autoKind(v: Variable): VarKind {
   return v.type === 'numeric' && v.nUnique > 10 ? 'continuous' : 'categorical'
 }
@@ -185,35 +229,22 @@ export function buildTable1(dataset: Dataset, opts: Table1Options): Table1 {
     )
     const totalMissing = missingByGroup.reduce((s, m) => s + m, 0)
 
-    // p-value: chi-square หรือ Fisher (2×2 ที่ expected เล็ก)
-    let p: number | null = null
-    let test = ''
-    if (varLevels.length >= 2 && colTot.some((n) => n > 0)) {
-      const cs = chiSquareFromMatrix(counts)
-      if (
-        varLevels.length === 2 && groupLevels.length === 2 &&
-        opts.fisherAuto && cs.minExpected < 5
-      ) {
-        p = fisher2x2(counts[0][0], counts[0][1], counts[1][0], counts[1][1]).p
-        test = 'Fisher exact test'
-      } else if (cs.df > 0 && Number.isFinite(cs.p)) {
-        p = cs.p
-        test = 'Pearson chi-square'
-      }
-    }
-    if (test) tests.add(test)
-
     if (spec.kind === 'binary') {
+      // แสดงระดับ "บวก" (เช่น ไว/S) เป็น %(n/N); ทดสอบสัดส่วนบนตาราง 2×G (บวก vs ไม่บวก)
       const pos = spec.positiveLevel ?? defaultPositiveLevel(varLevels)
       const posIdx = varLevels.indexOf(pos)
+      const posRow = groupLevels.map((_, gj) => (posIdx >= 0 ? counts[posIdx][gj] : 0))
+      const negRow = groupLevels.map((_, gj) => colTot[gj] - posRow[gj])
+      const { p, test } = testForMatrix([posRow, negRow], opts.fisherAuto)
+      if (test) tests.add(test)
       const cells = groupLevels.map((_, gj) => {
-        const n = posIdx >= 0 ? counts[posIdx][gj] : 0
+        const n = posRow[gj]
         const N = colTot[gj]
         return N > 0 ? `${((n / N) * 100).toFixed(1)}% (${n}/${N})` : '-'
       })
       const total = opts.showTotal
         ? (() => {
-            const n = posIdx >= 0 ? counts[posIdx].reduce((s, v2) => s + v2, 0) : 0
+            const n = posRow.reduce((s, v2) => s + v2, 0)
             return grandTot > 0 ? `${((n / grandTot) * 100).toFixed(1)}% (${n}/${grandTot})` : '-'
           })()
         : null
@@ -221,6 +252,9 @@ export function buildTable1(dataset: Dataset, opts: Table1Options): Table1 {
       continue
     }
 
+    // จัดกลุ่ม: ทดสอบไคสแควร์บนทั้งตาราง (ทุกระดับ × กลุ่ม)
+    const { p, test } = testForMatrix(counts, opts.fisherAuto)
+    if (test) tests.add(test)
     rows.push({ type: 'catHead', label: `${v.name}, n (%)`, p, test })
     varLevels.forEach((lvl, li) => {
       const cells = groupLevels.map((_, gj) => {
