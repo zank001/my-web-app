@@ -18,13 +18,24 @@ import {
 const ID_LIKE = /^(id|no\.?|seq|ลำดับ(ที่)?|รหัส|code|hn|an)$/i
 const GROUPISH = /(group|กลุ่ม|esbl|case|control|arm|treatment|status|ผล|ประเภท)/i
 
-function levelsOf(dataset: Dataset, name: string): string[] {
+function canonSrc(dataset: Dataset, name: string): (string | null)[] {
   const v = dataset.vars.find((x) => x.name === name)
   if (!v) return []
-  const src = v.type === 'numeric' ? v.num.map((x) => (Number.isFinite(x) ? String(x) : null)) : v.raw
+  return v.type === 'numeric' ? v.num.map((x) => (Number.isFinite(x) ? String(x) : null)) : v.raw
+}
+
+/** ระดับเรียงตามความถี่มาก→น้อย (ใช้กับตัวเลือกระดับ 'บวก') */
+function levelsOf(dataset: Dataset, name: string): string[] {
   const freq = new Map<string, number>()
-  for (const s of src) if (s !== null) freq.set(s, (freq.get(s) ?? 0) + 1)
+  for (const s of canonSrc(dataset, name)) if (s !== null) freq.set(s, (freq.get(s) ?? 0) + 1)
   return [...freq.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'th')).map((e) => e[0])
+}
+
+/** ระดับเรียงตามลำดับที่พบในข้อมูล — ตรงกับลำดับคอลัมน์ที่ buildTable1 ใช้ */
+function appearanceLevels(dataset: Dataset, name: string): string[] {
+  const out: string[] = []
+  for (const s of canonSrc(dataset, name)) if (s !== null && !out.includes(s)) out.push(s)
+  return out
 }
 
 export default function Table1Section({ dataset }: { dataset: Dataset }) {
@@ -81,9 +92,10 @@ export default function Table1Section({ dataset }: { dataset: Dataset }) {
     .filter((v) => v.name !== groupVar && included.has(v.name))
     .map((v) => ({ name: v.name, kind: kinds[v.name] ?? autoKind(v), positiveLevel: positives[v.name] }))
 
-  const groupLevelsRaw = useMemo(() => levelsOf(dataset, groupVar), [dataset, groupVar])
+  // ลำดับกลุ่มตามที่พบในข้อมูล (ตรงกับคอลัมน์จริง) — สลับได้เมื่อมี 2 กลุ่ม
+  const groupAppear = useMemo(() => appearanceLevels(dataset, groupVar), [dataset, groupVar])
   const groupOrder =
-    swapGroups && groupLevelsRaw.length === 2 ? [groupLevelsRaw[1], groupLevelsRaw[0]] : undefined
+    swapGroups && groupAppear.length === 2 ? [groupAppear[1], groupAppear[0]] : undefined
 
   const table = useMemo(
     () =>
@@ -152,7 +164,7 @@ export default function Table1Section({ dataset }: { dataset: Dataset }) {
               ))}
             </select>
           </label>
-          {groupLevelsRaw.length === 2 && (
+          {groupAppear.length === 2 && (
             <button
               onClick={() => setSwapGroups((s) => !s)}
               className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 hover:bg-slate-50"
@@ -295,7 +307,8 @@ export default function Table1Section({ dataset }: { dataset: Dataset }) {
             <div>* มีนัยสำคัญทางสถิติที่ระดับ p &lt; 0.05</div>
             {table.tests.length > 0 && <div>วิธีทดสอบ: {table.tests.join(', ')}</div>}
             <div>
-              ตัวแปรต่อเนื่องแสดงเป็น Mean ± SD · ตัวแปรจัดกลุ่มแสดงเป็น n (ร้อยละภายในกลุ่ม) ·
+              ตัวแปรต่อเนื่องแสดงเป็น Mean ± SD · ตัวแปรจัดกลุ่มแสดงเป็น n (ร้อยละภายในกลุ่ม
+              คิดจากผู้มีข้อมูล) · แถว “ไม่ระบุ (missing)” แสดงเมื่อมีข้อมูลขาดหาย ·
               ตรวจทานความเหมาะสมของการแจกแจงก่อนนำไปใช้ (ข้อมูลเบ้มากควรใช้ค่ามัธยฐาน/สถิติไม่อิงพารามิเตอร์)
             </div>
           </div>

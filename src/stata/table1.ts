@@ -124,16 +124,17 @@ export function buildTable1(dataset: Dataset, opts: Table1Options): Table1 {
     if (!v || v.name === opts.groupVar) continue
 
     if (spec.kind === 'continuous') {
+      // n=0 → '-', n=1 → ค่าเดียว (ไม่มี SD), n≥2 → Mean ± SD
+      const contCell = (s: { n: number; mean: number; sd: number }) =>
+        s.n === 0
+          ? '-'
+          : s.n === 1
+            ? `${s.mean.toFixed(dec)} (n=1)`
+            : `${s.mean.toFixed(dec)} ± ${s.sd.toFixed(dec)}`
       const perGroup = rowsByGroup.map((idx) => msd(idx.map((i) => v.num[i])))
-      const cells = perGroup.map((s) =>
-        s.n > 0 ? `${s.mean.toFixed(dec)} ± ${s.sd.toFixed(dec)}` : '-',
-      )
+      const cells = perGroup.map(contCell)
       const totalStat = msd(allRows.map((i) => v.num[i]))
-      const total = opts.showTotal
-        ? totalStat.n > 0
-          ? `${totalStat.mean.toFixed(dec)} ± ${totalStat.sd.toFixed(dec)}`
-          : '-'
-        : null
+      const total = opts.showTotal ? contCell(totalStat) : null
 
       let p: number | null = null
       let test = ''
@@ -178,6 +179,11 @@ export function buildTable1(dataset: Dataset, opts: Table1Options): Table1 {
     })
     const colTot = groupLevels.map((_, gj) => counts.reduce((s, r) => s + r[gj], 0))
     const grandTot = colTot.reduce((s, v2) => s + v2, 0)
+    // จำนวนที่ไม่มีข้อมูล (missing) ต่อกลุ่ม — ทำให้ผลรวมกระทบกับ n ของหัวคอลัมน์
+    const missingByGroup = rowsByGroup.map((idx) =>
+      idx.reduce((s, i) => s + (vcat[i] === null ? 1 : 0), 0),
+    )
+    const totalMissing = missingByGroup.reduce((s, m) => s + m, 0)
 
     // p-value: chi-square หรือ Fisher (2×2 ที่ expected เล็ก)
     let p: number | null = null
@@ -230,6 +236,15 @@ export function buildTable1(dataset: Dataset, opts: Table1Options): Table1 {
         : null
       rows.push({ type: 'catRow', label: `- ${lvl}`, cells, total })
     })
+    // แถวผู้ไม่มีข้อมูล เพื่อให้จำนวนรวมกันได้เท่ากับ n ของกลุ่ม (ร้อยละคิดจากผู้มีข้อมูล)
+    if (totalMissing > 0) {
+      rows.push({
+        type: 'catRow',
+        label: '- ไม่ระบุ (missing)',
+        cells: missingByGroup.map(String),
+        total: opts.showTotal ? String(totalMissing) : null,
+      })
+    }
   }
 
   return {
