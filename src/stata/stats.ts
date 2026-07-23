@@ -645,3 +645,115 @@ export function ttest2(
     unequal,
   }
 }
+
+// ---------- การทดสอบสำหรับ "ตารางที่ 1" (comparison table) ----------
+
+/** t-test สองกลุ่มจากค่าสรุป (n, mean, sd) — คืนค่า p สองหาง */
+export function tTestFromStats(
+  n1: number, m1: number, sd1: number,
+  n2: number, m2: number, sd2: number,
+  unequal: boolean,
+): { t: number; df: number; se: number; dm: number; p: number } {
+  const dm = m1 - m2
+  let se: number
+  let df: number
+  if (unequal) {
+    const a = (sd1 * sd1) / n1
+    const b = (sd2 * sd2) / n2
+    se = Math.sqrt(a + b)
+    df = ((a + b) * (a + b)) / ((a * a) / (n1 - 1) + (b * b) / (n2 - 1))
+  } else {
+    const sp2 = ((n1 - 1) * sd1 * sd1 + (n2 - 1) * sd2 * sd2) / (n1 + n2 - 2)
+    se = Math.sqrt(sp2 * (1 / n1 + 1 / n2))
+    df = n1 + n2 - 2
+  }
+  if (!(se > 0) || !(df > 0)) return { t: NaN, df, se, dm, p: NaN }
+  const t = dm / se
+  return { t, df, se, dm, p: tTail2(t, df) }
+}
+
+export interface OnewayResult {
+  F: number
+  df1: number
+  df2: number
+  p: number
+  ssb: number
+  ssw: number
+}
+
+/** วิเคราะห์ความแปรปรวนทางเดียว (one-way ANOVA) จากอาร์เรย์ค่าของแต่ละกลุ่ม */
+export function oneway(groups: number[][]): OnewayResult {
+  const g = groups.map((arr) => arr.filter(Number.isFinite))
+  const k = g.length
+  let N = 0
+  let grand = 0
+  for (const arr of g) for (const x of arr) { N++; grand += x }
+  if (N === 0 || k < 2) return { F: NaN, df1: k - 1, df2: N - k, p: NaN, ssb: 0, ssw: 0 }
+  grand /= N
+  let ssb = 0
+  let ssw = 0
+  for (const arr of g) {
+    if (arr.length === 0) continue
+    const m = arr.reduce((s, x) => s + x, 0) / arr.length
+    ssb += arr.length * (m - grand) * (m - grand)
+    for (const x of arr) ssw += (x - m) * (x - m)
+  }
+  const df1 = k - 1
+  const df2 = N - k
+  if (df2 < 1) return { F: NaN, df1, df2, p: NaN, ssb, ssw }
+  const F = ssw > 0 ? (ssb / df1) / (ssw / df2) : (ssb > 0 ? Infinity : 0)
+  return { F, df1, df2, p: fTail(F, df1, df2), ssb, ssw }
+}
+
+export interface ChiSquareResult {
+  chi2: number
+  df: number
+  p: number
+  minExpected: number
+  N: number
+}
+
+/** ทดสอบไคสแควร์แห่งความเป็นอิสระจากเมทริกซ์ความถี่ (แถว × คอลัมน์) */
+export function chiSquareFromMatrix(counts: number[][]): ChiSquareResult {
+  const R = counts.length
+  const C = R > 0 ? counts[0].length : 0
+  const rowT = counts.map((r) => r.reduce((s, v) => s + v, 0))
+  const colT = Array.from({ length: C }, (_, j) => counts.reduce((s, r) => s + r[j], 0))
+  const N = rowT.reduce((s, v) => s + v, 0)
+  let chi2 = 0
+  let minExpected = Infinity
+  if (N > 0) {
+    for (let i = 0; i < R; i++) {
+      for (let j = 0; j < C; j++) {
+        const e = (rowT[i] * colT[j]) / N
+        if (e < minExpected) minExpected = e
+        if (e > 0) chi2 += ((counts[i][j] - e) * (counts[i][j] - e)) / e
+      }
+    }
+  }
+  const df = (R - 1) * (C - 1)
+  return { chi2, df, p: df > 0 && N > 0 ? chi2Tail(chi2, df) : NaN, minExpected, N }
+}
+
+/** Fisher's exact test สองหาง สำหรับตาราง 2×2 */
+export function fisher2x2(
+  a: number, b: number, c: number, d: number,
+): { p: number; pObs: number } {
+  const r1 = a + b
+  const r2 = c + d
+  const c1 = a + c
+  const N = a + b + c + d
+  if (N === 0) return { p: NaN, pObs: NaN }
+  const lnC = (n: number, k: number) =>
+    lnGamma(n + 1) - lnGamma(k + 1) - lnGamma(n - k + 1)
+  const logp = (x: number) => lnC(r1, x) + lnC(r2, c1 - x) - lnC(N, c1)
+  const lo = Math.max(0, c1 - r2)
+  const hi = Math.min(r1, c1)
+  const pObs = Math.exp(logp(a))
+  let p = 0
+  for (let x = lo; x <= hi; x++) {
+    const px = Math.exp(logp(x))
+    if (px <= pObs * (1 + 1e-7)) p += px
+  }
+  return { p: Math.min(1, p), pObs }
+}

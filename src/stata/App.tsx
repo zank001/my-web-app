@@ -19,6 +19,7 @@ import AiSettings from '../components/AiSettings'
 import { getProvider, providerLabel } from '../lib/ai'
 import { extractTableFromImage } from './imageTable'
 import { catValues, parseTable, type Dataset, type Variable } from './parse'
+import Table1Section from './Table1'
 import { pwcorr, regress, summarize, tab2, tabulate, ttest2 } from './stats'
 import {
   renderDetail,
@@ -423,6 +424,16 @@ export default function App() {
           </section>
         )}
 
+        {/* ตารางที่ 1 — ตารางเปรียบเทียบระหว่างกลุ่ม (ฟีเจอร์หลักสำหรับงานวิจัย) */}
+        {dataset && <Table1Section dataset={dataset} />}
+
+        {dataset && (
+          <details className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <summary className="cursor-pointer px-4 py-2.5 text-sm font-semibold text-slate-700">
+              การวิเคราะห์รายตัวแปร (summarize / tabulate / correlate / regress / t-test / chi²)
+            </summary>
+            <div className="space-y-5 border-t border-slate-100 p-4">
+
         {/* summarize */}
         {dataset && numericVars.length > 0 && (
           <OutputBlock
@@ -611,6 +622,9 @@ export default function App() {
               </label>
             </div>
           </OutputBlock>
+        )}
+            </div>
+          </details>
         )}
       </main>
 
