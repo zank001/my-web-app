@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, ClipboardCopy, TableProperties } from 'lucide-react'
+import { Check, ClipboardCopy, Eye, FileDown, TableProperties } from 'lucide-react'
 import type { Dataset, Variable } from './parse'
 import {
   autoKind,
@@ -54,7 +54,8 @@ export default function Table1Section({ dataset }: { dataset: Dataset }) {
   const [fisherAuto, setFisherAuto] = useState(true)
   const [swapGroups, setSwapGroups] = useState(false)
   const [title, setTitle] = useState('ตารางที่ 1 เปรียบเทียบลักษณะพื้นฐานระหว่างกลุ่ม')
-  const [copied, setCopied] = useState(false)
+  const [pubView, setPubView] = useState(false)
+  const [copiedWhat, setCopiedWhat] = useState<string | null>(null)
 
   // ตั้งค่าเริ่มต้นเมื่อชุดข้อมูลเปลี่ยน — เลือกกลุ่มและตัวแปรที่เหมาะสมให้อัตโนมัติ
   useEffect(() => {
@@ -121,25 +122,55 @@ export default function Table1Section({ dataset }: { dataset: Dataset }) {
 
   const controllable = dataset.vars.filter((v) => v.name !== groupVar)
 
-  const doCopy = async () => {
-    if (!table || table.error) return
-    const { html, tsv } = exportTable(table, title)
+  const flash = (what: string) => {
+    setCopiedWhat(what)
+    setTimeout(() => setCopiedWhat(null), 1600)
+  }
+  const exp = () => (table && !table.error ? exportTable(table, title, showTotal) : null)
+
+  const copyWord = async () => {
+    const e = exp()
+    if (!e) return
     try {
       await navigator.clipboard.write([
         new ClipboardItem({
-          'text/html': new Blob([html], { type: 'text/html' }),
-          'text/plain': new Blob([tsv], { type: 'text/plain' }),
+          'text/html': new Blob([e.html], { type: 'text/html' }),
+          'text/plain': new Blob([e.tsv], { type: 'text/plain' }),
         }),
       ])
     } catch {
       try {
-        await navigator.clipboard.writeText(tsv)
+        await navigator.clipboard.writeText(e.tsv)
       } catch {
         return
       }
     }
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1600)
+    flash('word')
+  }
+  const copyMarkdown = async () => {
+    const e = exp()
+    if (!e) return
+    try {
+      await navigator.clipboard.writeText(e.markdown)
+    } catch {
+      return
+    }
+    flash('md')
+  }
+  const downloadCsv = () => {
+    const e = exp()
+    if (!e) return
+    // นำหน้าด้วย BOM เพื่อให้ Excel เปิดภาษาไทยได้ถูกต้อง
+    const blob = new Blob(['﻿' + e.csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${(title || 'table1').replace(/[\\/:*?"<>|]/g, '_')}.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    flash('csv')
   }
 
   const selectCls =
@@ -154,17 +185,49 @@ export default function Table1Section({ dataset }: { dataset: Dataset }) {
           <TableProperties size={16} className="text-brand-600" />
           ตารางที่ 1 — ตารางเปรียบเทียบระหว่างกลุ่ม (พร้อม p-value)
         </div>
-        <button
-          onClick={doCopy}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-          title="คัดลอกตารางไปวางใน Word / Google Docs ได้ทันที (คงรูปแบบตาราง)"
-        >
-          {copied ? <Check size={13} className="text-emerald-600" /> : <ClipboardCopy size={13} />}
-          {copied ? 'คัดลอกแล้ว' : 'คัดลอกตาราง (วางใน Word)'}
-        </button>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            onClick={() => setPubView((v) => !v)}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${
+              pubView
+                ? 'border-brand-300 bg-brand-50 text-brand-700'
+                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+            }`}
+            title="ซ่อนปุ่มควบคุม เหลือเฉพาะตารางสำหรับตีพิมพ์/แคปหน้าจอ"
+          >
+            <Eye size={13} /> {pubView ? 'แสดงตัวควบคุม' : 'โหมดตีพิมพ์'}
+          </button>
+          <span className="ml-1 text-[11px] text-slate-400">คัดลอก:</span>
+          <button
+            onClick={copyWord}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+            title="วางใน Word / Google Docs ได้ทันที คงรูปแบบตาราง"
+          >
+            {copiedWhat === 'word' ? <Check size={13} className="text-emerald-600" /> : <ClipboardCopy size={13} />}
+            Word
+          </button>
+          <button
+            onClick={copyMarkdown}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+            title="คัดลอกเป็นตาราง Markdown"
+          >
+            {copiedWhat === 'md' ? <Check size={13} className="text-emerald-600" /> : <ClipboardCopy size={13} />}
+            Markdown
+          </button>
+          <button
+            onClick={downloadCsv}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+            title="ดาวน์โหลดไฟล์ CSV (เปิดใน Excel)"
+          >
+            {copiedWhat === 'csv' ? <Check size={13} className="text-emerald-600" /> : <FileDown size={13} />}
+            CSV
+          </button>
+        </div>
       </div>
 
       <div className="space-y-3 p-4">
+        {!pubView && (
+        <>
         {/* ตัวควบคุม */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-600">
           <label className="inline-flex items-center gap-1.5">
@@ -246,6 +309,11 @@ export default function Table1Section({ dataset }: { dataset: Dataset }) {
           onChange={(e) => setTitle(e.target.value)}
           className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-800 focus:border-brand-500 focus:outline-none"
         />
+        </>
+        )}
+
+        {/* โหมดตีพิมพ์: แสดงชื่อตารางเป็นหัวเรื่องคงที่ */}
+        {pubView && <div className="text-sm font-semibold text-slate-800">{title}</div>}
 
         {/* ตารางผลลัพธ์ */}
         {table?.error ? (
@@ -340,34 +408,57 @@ function sigCls(p: number | null): string {
 const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
-/** สร้าง HTML (สำหรับวางใน Word) และ TSV (ข้อความล้วน) จากตาราง */
-function exportTable(
+/** แปลงตารางเป็นเมทริกซ์ข้อความ (หัวตาราง + เนื้อ) ทุกแถวยาวเท่ากัน */
+function matrixOf(
   table: NonNullable<ReturnType<typeof buildTable1>>,
-  title: string,
-): { html: string; tsv: string } {
-  const showTotal = table.rows.some((r) => 'total' in r && r.total !== null)
+  showTotal: boolean,
+): { head: string[]; body: string[][] } {
   const head = ['ลักษณะ', ...table.groupLevels.map((lv, j) => `${lv} (n=${table.groupN[j]})`)]
   if (showTotal) head.push(`รวม (n=${table.totalN})`)
   head.push('p-value')
+  const nMid = table.groupLevels.length + (showTotal ? 1 : 0)
+  const body: string[][] = []
+  for (const row of table.rows) {
+    if (row.type === 'catHead') {
+      body.push([row.label, ...Array(nMid).fill(''), pText(row.p)])
+      continue
+    }
+    const cells = [...row.cells]
+    if (showTotal) cells.push(row.total ?? '')
+    const pCell = row.type === 'catRow' ? '' : pText(row.p)
+    body.push([row.label, ...cells, pCell])
+  }
+  return { head, body }
+}
 
-  const tsvRows: string[] = [title, head.join('\t')]
-  const bd = 'border:1px solid #333;padding:4px 8px;'
+/** สร้างผลลัพธ์หลายรูปแบบสำหรับคัดลอก/ดาวน์โหลด (Word/HTML, Markdown, CSV, TSV) */
+function exportTable(
+  table: NonNullable<ReturnType<typeof buildTable1>>,
+  title: string,
+  showTotal: boolean,
+): { html: string; markdown: string; csv: string; tsv: string } {
+  const { head, body } = matrixOf(table, showTotal)
+  const notes = [
+    '* มีนัยสำคัญทางสถิติที่ระดับ p < 0.05',
+    table.tests.length ? `วิธีทดสอบ: ${table.tests.join(', ')}` : '',
+  ].filter(Boolean)
+
+  // HTML (Word / Google Docs) — สร้างจาก rows โดยตรงเพื่อรวมเซลล์หัวหมวด (colspan)
+  const bd = 'border:1px solid #000;padding:4px 8px;'
   const htmlRows: string[] = []
   htmlRows.push(
     `<tr>${head
-      .map((h, j) => `<th style="${bd}text-align:${j === 0 ? 'left' : 'center'};background:#f1f5f9;">${esc(h)}</th>`)
+      .map((h, j) => `<th style="${bd}text-align:${j === 0 ? 'left' : 'center'};font-weight:bold;">${esc(h)}</th>`)
       .join('')}</tr>`,
   )
-
   for (const row of table.rows) {
     if (row.type === 'catHead') {
       const span = table.groupLevels.length + (showTotal ? 1 : 0)
       htmlRows.push(
-        `<tr><td style="${bd}font-weight:600;">${esc(row.label)}</td>` +
+        `<tr><td style="${bd}font-weight:bold;">${esc(row.label)}</td>` +
           `<td style="${bd}" colspan="${span}"></td>` +
           `<td style="${bd}text-align:center;">${esc(pText(row.p))}</td></tr>`,
       )
-      tsvRows.push([row.label, ...Array(span).fill(''), pText(row.p)].join('\t'))
       continue
     }
     const cells = [...row.cells]
@@ -379,18 +470,34 @@ function exportTable(
         cells.map((c) => `<td style="${bd}text-align:center;">${esc(c)}</td>`).join('') +
         `<td style="${bd}text-align:center;">${esc(pCell)}</td></tr>`,
     )
-    tsvRows.push([row.label, ...cells, pCell].join('\t'))
   }
-
-  const notes = [
-    '* มีนัยสำคัญทางสถิติที่ระดับ p < 0.05',
-    table.tests.length ? `วิธีทดสอบ: ${table.tests.join(', ')}` : '',
-  ].filter(Boolean)
-
   const html =
-    `<p style="font-weight:600;">${esc(title)}</p>` +
-    `<table style="border-collapse:collapse;font-family:sans-serif;font-size:13px;">${htmlRows.join('')}</table>` +
-    notes.map((n) => `<p style="font-size:11px;color:#555;margin:2px 0;">${esc(n)}</p>`).join('')
-  const tsv = [...tsvRows, '', ...notes].join('\n')
-  return { html, tsv }
+    `<p style="font-weight:bold;margin:0 0 4px;">${esc(title)}</p>` +
+    `<table style="border-collapse:collapse;font-family:'Times New Roman',serif;font-size:13px;">${htmlRows.join('')}</table>` +
+    notes.map((n) => `<p style="font-size:11px;margin:2px 0;">${esc(n)}</p>`).join('')
+
+  // Markdown
+  const mdEsc = (s: string) => s.replace(/\|/g, '\\|')
+  const markdown = [
+    `**${title}**`,
+    '',
+    `| ${head.map(mdEsc).join(' | ')} |`,
+    `| ${head.map(() => '---').join(' | ')} |`,
+    ...body.map((r) => `| ${r.map(mdEsc).join(' | ')} |`),
+    '',
+    ...notes,
+  ].join('\n')
+
+  // CSV / TSV
+  const csvEsc = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s)
+  const csv = [
+    csvEsc(title),
+    head.map(csvEsc).join(','),
+    ...body.map((r) => r.map(csvEsc).join(',')),
+    '',
+    ...notes.map(csvEsc),
+  ].join('\n')
+  const tsv = [title, head.join('\t'), ...body.map((r) => r.join('\t')), '', ...notes].join('\n')
+
+  return { html, markdown, csv, tsv }
 }
